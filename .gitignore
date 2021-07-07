@@ -1,0 +1,5 @@
+.nyc_output/
+.parcel-cache/
+node_modules/
+.vscode.
+dist/

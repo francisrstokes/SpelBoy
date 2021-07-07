@@ -1,0 +1,26 @@
+{
+  "name": "spelboy",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "tape -r ts-node/register tests/**/*.test.ts",
+    "test:single": "tape -r ts-node/register",
+    "coverage": "nyc npm run test | tap-nyc",
+    "start": "parcel src/index.html"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/tape": "^4.13.0",
+    "nyc": "^15.1.0",
+    "tap-nyc": "^1.0.3",
+    "tape": "^5.2.2",
+    "ts-node": "^10.0.0",
+    "typescript": "^4.3.4"
+  },
+  "dependencies": {
+    "parcel": "^2.0.0-nightly.734"
+  }
+}
