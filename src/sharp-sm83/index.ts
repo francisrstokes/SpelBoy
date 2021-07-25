@@ -1,6 +1,8 @@
 import { Registers, IRegisters } from './registers';
 import { IMemoryInterface } from '../memory-interface';
 import { ops } from './ops';
+import { toHexString } from '../utils';
+import { Clock } from '../clock';
 
 export enum Flags {
   Zero          = (1 << 7),
@@ -17,18 +19,15 @@ export enum Flags {
 export class SM83 {
   registers: IRegisters = new Registers();
   memory: IMemoryInterface;
-  cycles: number = 0;
+  clock: Clock;
 
   IME: boolean = true; // TODO: Find initial value
   isHalted = false;
   isStopped = false;
 
-  constructor(memory: IMemoryInterface) {
+  constructor(memory: IMemoryInterface, clock: Clock) {
     this.memory = memory;
-  }
-
-  cycleMachine(times: number) {
-    this.cycles += times;
+    this.clock = clock;
   }
 
   execute(opcode: number) {
@@ -37,6 +36,14 @@ export class SM83 {
 
   fetchDecodeExecute() {
     const opcode = this.memory.read(this.registers.pc++);
-    return this.execute(opcode);
+    this.execute(opcode);
+  }
+
+  printState() {
+    const {a, b, c, d, e, h, l, f, sp, pc} = this.registers;
+    console.log(`A=${toHexString(a, 2)}\tB=${toHexString(b, 2)}\tC=${toHexString(c, 2)}\tD=${toHexString(d, 2)}\t`);
+    console.log(`E=${toHexString(e, 2)}\tH=${toHexString(h, 2)}\tL=${toHexString(l, 2)}\tF=${toHexString(f, 2)}\t`);
+    console.log(`PC=${toHexString(pc)}\tSP=${toHexString(sp, 2)}`);
+    console.log('----------------------------');
   }
 };
