@@ -144,7 +144,7 @@ type RegName = KeysOfType<IRegisters, number>;
 /* 0x17 */ const RLA = (cpu: SM83) => {
   cpu.cycles += (1 * 4);
   const carry = cpu.registers.a >> 7;
-  cpu.registers.a = (cpu.registers.a << 1) | (cpu.registers.f >> Flags.CarryBit);
+  cpu.registers.a = (cpu.registers.a << 1) | ((cpu.registers.f >> Flags.CarryBit) & 1);
   cpu.registers.f = carry ? Flags.Carry : 0;
 };
 /* 0x18 */ const JR_n = (cpu: SM83) => {
@@ -196,7 +196,7 @@ type RegName = KeysOfType<IRegisters, number>;
 /* 0x1F */ const RRA = (cpu: SM83) => {
   cpu.cycles += (1 * 4);
   const borrow = cpu.registers.a & 0x01;
-  const flagsBorrowBit = cpu.registers.f >> Flags.CarryBit;
+  const flagsBorrowBit = (cpu.registers.f >> Flags.CarryBit) & 1;
   cpu.registers.a = (flagsBorrowBit << 7) | (cpu.registers.a >> 1);
   cpu.registers.f = borrow ? Flags.Carry : 0;
 };

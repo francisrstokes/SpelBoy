@@ -27,7 +27,7 @@ const makeRrc = (reg: RegName) => (cpu: SM83) => {
 const makeRl = (reg: RegName) => (cpu: SM83) => {
   cpu.cycles += (2 * 4);
   const carry = cpu.registers[reg] >> 7;
-  cpu.registers[reg] = (cpu.registers[reg] << 1) | (cpu.registers.f >> Flags.CarryBit);
+  cpu.registers[reg] = (cpu.registers[reg] << 1) | ((cpu.registers.f >> Flags.CarryBit) & 1);
   cpu.registers.f = (
     (carry ? Flags.Carry : 0)
     | (cpu.registers[reg] === 0 ? Flags.Zero : 0)
@@ -37,7 +37,7 @@ const makeRl = (reg: RegName) => (cpu: SM83) => {
 const makeRr = (reg: RegName) => (cpu: SM83) => {
   cpu.cycles += (2 * 4);
   const carry = cpu.registers[reg] & 0x01;
-  cpu.registers[reg] = (cpu.registers.f >> Flags.CarryBit) << 7 | (cpu.registers[reg] >> 1);
+  cpu.registers[reg] = ((cpu.registers.f >> Flags.CarryBit) & 1) << 7 | (cpu.registers[reg] >> 1);
   cpu.registers.f = (
     (carry ? Flags.Carry : 0)
     | (cpu.registers[reg] === 0 ? Flags.Zero : 0)
