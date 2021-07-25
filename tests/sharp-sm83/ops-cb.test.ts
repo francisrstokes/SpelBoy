@@ -2,6 +2,7 @@ import { IMemoryInterface } from '../../src/memory-interface/index';
 import test from 'tape';
 import {createMockMemory, RegName} from './utils';
 import { SM83, Flags} from '../../src/sharp-sm83/index';
+import { Clock } from '../../src/clock';
 
 const HL_ADDR = 0x1234;
 
@@ -16,7 +17,7 @@ type InstructionTestCb = (t: test.Test, opcode: number, cpu: SM83, memory: IMemo
 const cbTest = (opcode: number, name: string, mValues: Record<number, number>, cb: InstructionTestCb) => {
   test(`CB Prefix: 0x${opcode.toString(16).padStart(2, '0')} [${name}]`, t => {
     const memory = createMockMemory(mValues);
-    const cpu = new SM83(memory);
+    const cpu = new SM83(memory, new Clock());
     cb(t, opcode, cpu, memory);
     t.end();
   });
@@ -26,7 +27,7 @@ const rlc = (opcode: number, name: string, reg: RegName) => {
   return cbTest(opcode, name, generateCBOpcodeMemory(opcode, 3), (t, _, cpu) => {
     cpu.registers[reg] = 0b10101010;
     cpu.execute(0xCB);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers[reg] === 0b01010101);
     t.assert(cpu.registers.f === Flags.Carry);
 
@@ -48,7 +49,7 @@ const rrc = (opcode: number, name: string, reg: RegName) => {
     cpu.execute(0xCB);
     t.assert(cpu.registers[reg] === 0b01010101);
     t.assert(cpu.registers.f === 0);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
 
     cpu.registers[reg] = 0b00001000;
     cpu.execute(0xCB);
@@ -71,7 +72,7 @@ const rl = (opcode: number, name: string, reg: RegName) => {
   return cbTest(opcode, name, generateCBOpcodeMemory(opcode, 5), (t, _, cpu) => {
     cpu.registers[reg] = 0b10101010;
     cpu.execute(0xCB);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers[reg] === 0b01010100);
     t.assert(cpu.registers.f === Flags.Carry);
 
@@ -104,7 +105,7 @@ const rr = (opcode: number, name: string, reg: RegName) => {
   return cbTest(opcode, name, generateCBOpcodeMemory(opcode, 6), (t, _, cpu) => {
     cpu.registers[reg] = 0b10101010;
     cpu.execute(0xCB);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers[reg] === 0b01010101);
     t.assert(cpu.registers.f === 0);
 
@@ -142,7 +143,7 @@ const sla = (opcode: number, name: string, reg: RegName) => {
   return cbTest(opcode, name, generateCBOpcodeMemory(opcode, 5), (t, _, cpu) => {
     cpu.registers[reg] = 0b10101010;
     cpu.execute(0xCB);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers[reg] === 0b01010100);
     t.assert(cpu.registers.f === Flags.Carry);
 
@@ -173,7 +174,7 @@ const sra = (opcode: number, name: string, reg: RegName) => {
   return cbTest(opcode, name, generateCBOpcodeMemory(opcode, 5), (t, _, cpu) => {
     cpu.registers[reg] = 0b10101010;
     cpu.execute(0xCB);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers[reg] === 0b11010101);
     t.assert(cpu.registers.f === 0);
 
@@ -204,7 +205,7 @@ const srl = (opcode: number, name: string, reg: RegName) => {
   return cbTest(opcode, name, generateCBOpcodeMemory(opcode, 5), (t, _, cpu) => {
     cpu.registers[reg] = 0b10101010;
     cpu.execute(0xCB);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers[reg] === 0b01010101);
     t.assert(cpu.registers.f === 0);
 
@@ -235,7 +236,7 @@ const swap = (opcode: number, name: string, reg: RegName) => {
   return cbTest(opcode, name, generateCBOpcodeMemory(opcode, 5), (t, _, cpu) => {
     cpu.registers[reg] = 0xab;
     cpu.execute(0xCB);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers[reg] === 0xba);
     t.assert(cpu.registers.f === 0);
 
@@ -259,7 +260,7 @@ const bit = (opcode: number, name: string, reg: RegName, index: number) => {
   return cbTest(opcode, name, generateCBOpcodeMemory(opcode, 3), (t, _, cpu) => {
     cpu.registers[reg] = ~(1 << index) & 0xff;
     cpu.execute(0xCB);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers.f === (Flags.Zero | Flags.HalfCarry));
 
     cpu.registers[reg] = 1 << index;
@@ -278,7 +279,7 @@ const bitmHL = (opcode: number, name: string, index: number) => {
     cpu.registers.hl = HL_ADDR;
     cpu.memory.write(HL_ADDR, ~(1 << index) & 0xff);
     cpu.execute(0xCB);
-    t.assert(cpu.cycles === (3 * 4));
+    t.assert(cpu.clock.cycles === (3 * 4));
     t.assert(cpu.registers.f === (Flags.Zero | Flags.HalfCarry));
 
     cpu.memory.write(HL_ADDR, 1 << index);
@@ -296,7 +297,7 @@ const res = (opcode: number, name: string, reg: RegName, index: number) => {
   return cbTest(opcode, name, generateCBOpcodeMemory(opcode, 4), (t, _, cpu) => {
     cpu.registers[reg] = 0xff;
     cpu.execute(0xCB);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers[reg] === (~(1 << index) & 0xff));
 
     cpu.registers[reg] = ~(1 << index) & 0xff;
@@ -319,7 +320,7 @@ const resmHL = (opcode: number, name: string, index: number) => {
     cpu.registers.hl = HL_ADDR;
     cpu.memory.write(HL_ADDR, 0xff);
     cpu.execute(0xCB);
-    t.assert(cpu.cycles === (4 * 4));
+    t.assert(cpu.clock.cycles === (4 * 4));
     t.assert(cpu.memory.read(HL_ADDR) === (~(1 << index) & 0xff));
 
     cpu.memory.write(HL_ADDR, ~(1 << index) & 0xff);
@@ -341,7 +342,7 @@ const set = (opcode: number, name: string, reg: RegName, index: number) => {
   return cbTest(opcode, name, generateCBOpcodeMemory(opcode, 4), (t, _, cpu) => {
     cpu.registers[reg] = 0;
     cpu.execute(0xCB);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers[reg] === (1 << index));
 
     cpu.registers[reg] = ~(1 << index) & 0xff;
@@ -364,7 +365,7 @@ const setmHL = (opcode: number, name: string, index: number) => {
     cpu.registers.hl = HL_ADDR;
     cpu.memory.write(HL_ADDR, 0);
     cpu.execute(0xCB);
-    t.assert(cpu.cycles === (4 * 4));
+    t.assert(cpu.clock.cycles === (4 * 4));
     t.assert(cpu.memory.read(HL_ADDR) === (1 << index));
 
     cpu.memory.write(HL_ADDR, ~(1 << index) & 0xff);
@@ -392,7 +393,7 @@ cbTest(0x06, 'RLC_mHL', generateCBOpcodeMemory(0x06, 3), (t, _, cpu) => {
   cpu.registers.hl = HL_ADDR;
   cpu.memory.write(HL_ADDR, 0b10101010);
   cpu.execute(0xCB);
-  t.assert(cpu.cycles === (4 * 4));
+  t.assert(cpu.clock.cycles === (4 * 4));
   t.assert(cpu.memory.read(HL_ADDR) === 0b01010101);
   t.assert(cpu.registers.f === Flags.Carry);
 
@@ -417,7 +418,7 @@ cbTest(0x0E, 'RRC_mHL', generateCBOpcodeMemory(0x0E, 3), (t, _, cpu) => {
   cpu.registers.hl = HL_ADDR;
   cpu.memory.write(HL_ADDR, 0b10101010);
   cpu.execute(0xCB);
-  t.assert(cpu.cycles === (4 * 4));
+  t.assert(cpu.clock.cycles === (4 * 4));
   t.assert(cpu.memory.read(HL_ADDR) === 0b01010101);
   t.assert(cpu.registers.f === 0);
 
@@ -447,7 +448,7 @@ cbTest(0x16, 'RL_mHL', generateCBOpcodeMemory(0x16, 5), (t, _, cpu) => {
   cpu.registers.hl = HL_ADDR;
   cpu.memory.write(HL_ADDR, 0b10101010);
   cpu.execute(0xCB);
-  t.assert(cpu.cycles === (4 * 4));
+  t.assert(cpu.clock.cycles === (4 * 4));
   t.assert(cpu.memory.read(HL_ADDR) === 0b01010100);
   t.assert(cpu.registers.f === Flags.Carry);
 
@@ -485,7 +486,7 @@ cbTest(0x1E, 'RR_mHL', generateCBOpcodeMemory(0x1E, 6), (t, _, cpu) => {
   cpu.registers.hl = HL_ADDR;
   cpu.memory.write(HL_ADDR, 0b10101010);
   cpu.execute(0xCB);
-  t.assert(cpu.cycles === (4 * 4));
+  t.assert(cpu.clock.cycles === (4 * 4));
   t.assert(cpu.memory.read(HL_ADDR) === 0b01010101);
   t.assert(cpu.registers.f === 0);
 
@@ -528,7 +529,7 @@ cbTest(0x26, 'SLA_mHL', generateCBOpcodeMemory(0x26, 5), (t, _, cpu) => {
   cpu.registers.hl = HL_ADDR;
   cpu.memory.write(HL_ADDR, 0b10101010);
   cpu.execute(0xCB);
-  t.assert(cpu.cycles === (4 * 4));
+  t.assert(cpu.clock.cycles === (4 * 4));
   t.assert(cpu.memory.read(HL_ADDR) === 0b01010100);
   t.assert(cpu.registers.f === Flags.Carry);
 
@@ -564,7 +565,7 @@ cbTest(0x2E, 'SRA_mHL', generateCBOpcodeMemory(0x2E, 5), (t, _, cpu) => {
   cpu.registers.hl = HL_ADDR;
   cpu.memory.write(HL_ADDR, 0b10101010);
   cpu.execute(0xCB);
-  t.assert(cpu.cycles === (4 * 4));
+  t.assert(cpu.clock.cycles === (4 * 4));
   t.assert(cpu.memory.read(HL_ADDR) === 0b11010101);
   t.assert(cpu.registers.f === 0);
 
@@ -600,7 +601,7 @@ cbTest(0x36, 'SWAP_mHL', generateCBOpcodeMemory(0x36, 5), (t, _, cpu) => {
   cpu.registers.hl = HL_ADDR;
   cpu.memory.write(HL_ADDR, 0xab);
   cpu.execute(0xCB);
-  t.assert(cpu.cycles === (4 * 4));
+  t.assert(cpu.clock.cycles === (4 * 4));
   t.assert(cpu.memory.read(HL_ADDR) === 0xba);
   t.assert(cpu.registers.f === 0);
 
@@ -629,7 +630,7 @@ cbTest(0x3E, 'SRL_mHL', generateCBOpcodeMemory(0x3E, 5), (t, _, cpu) => {
   cpu.registers.hl = HL_ADDR;
   cpu.memory.write(HL_ADDR, 0b10101010);
   cpu.execute(0xCB);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.memory.read(HL_ADDR) === 0b01010101);
   t.assert(cpu.registers.f === 0);
 

@@ -2,12 +2,13 @@ import { IMemoryInterface } from '../../src/memory-interface/index';
 import test from 'tape';
 import {regs, createMockMemory, RegName} from './utils';
 import { SM83, Flags} from '../../src/sharp-sm83/index';
+import { Clock } from '../../src/clock';
 
 type InstructionTestCb = (t: test.Test, opcode: number, cpu: SM83, memory: IMemoryInterface) => void;
 const instructionTest = (opcode: number, name: string, mValues: Record<number, number>, cb: InstructionTestCb) => {
   test(`Instructions: 0x${opcode.toString(16).padStart(2, '0')} [${name}]`, t => {
     const memory = createMockMemory(mValues);
-    const cpu = new SM83(memory);
+    const cpu = new SM83(memory, new Clock());
     cb(t, opcode, cpu, memory);
     t.end();
   });
@@ -16,7 +17,7 @@ const instructionTest = (opcode: number, name: string, mValues: Record<number, n
 const incReg16Test = (opcode: number, name: string, reg: RegName) => {
   return instructionTest(opcode, name, {}, (t, opcode, cpu) => {
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers[reg] === 1);
 
     cpu.registers[reg] = 0xffff;
@@ -28,7 +29,7 @@ const incReg16Test = (opcode: number, name: string, reg: RegName) => {
 const decReg16Test = (opcode: number, name: string, reg: RegName) => {
   return instructionTest(opcode, name, {}, (t, opcode, cpu) => {
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers[reg] === 0xffff);
     cpu.execute(opcode);
     t.assert(cpu.registers[reg] === 0xfffe);
@@ -38,7 +39,7 @@ const decReg16Test = (opcode: number, name: string, reg: RegName) => {
 const incReg8Test = (opcode: number, name: string, reg: RegName) => {
   return instructionTest(opcode, name, {}, (t, opcode, cpu) => {
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (1 * 4));
+    t.assert(cpu.clock.cycles === (1 * 4));
     t.assert(cpu.registers[reg] === 1);
     t.assert((cpu.registers.f & Flags.Zero) === 0);
     t.assert((cpu.registers.f & Flags.HalfCarry) === 0);
@@ -66,7 +67,7 @@ const incReg8Test = (opcode: number, name: string, reg: RegName) => {
 const decReg8Test = (opcode: number, name: string, reg: RegName) => {
   return instructionTest(opcode, name, {}, (t, opcode, cpu) => {
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (1 * 4));
+    t.assert(cpu.clock.cycles === (1 * 4));
     t.assert(cpu.registers[reg] === 0xff);
     t.assert((cpu.registers.f & Flags.Zero) === 0);
     t.assert((cpu.registers.f & Flags.HalfCarry) === Flags.HalfCarry);
@@ -86,7 +87,7 @@ const decReg8Test = (opcode: number, name: string, reg: RegName) => {
 const loadReg8ImmTest = (opcode: number, name: string, reg: RegName) => {
   return instructionTest(opcode, name, { 0: 0xaa }, (t, opcode, cpu) => {
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers[reg] === 0xaa);
   });
 };
@@ -95,7 +96,7 @@ const loadReg8Reg8 = (opcode: number, name: string, regA: RegName, regB: RegName
   return instructionTest(opcode, name, {}, (t, opcode, cpu) => {
     cpu.registers[regB] = 0xaa;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (1 * 4));
+    t.assert(cpu.clock.cycles === (1 * 4));
     t.assert(cpu.registers[regA] === 0xaa);
   });
 };
@@ -104,7 +105,7 @@ const loadReg8HLPtr = (opcode: number, name: string, reg: RegName) => {
   return instructionTest(opcode, name, { 0x1000: 0xaa }, (t, opcode, cpu) => {
     cpu.registers.hl = 0x1000;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers[reg] === 0xaa);
   });
 };
@@ -114,7 +115,7 @@ const loadHLPtrReg = (opcode: number, name: string, reg: RegName) => {
     cpu.registers.hl = 0x1000;
     cpu.registers[reg] = 0xaa;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.memory.read(0x1000) === 0xaa);
   });
 };
@@ -122,7 +123,7 @@ const loadHLPtrReg = (opcode: number, name: string, reg: RegName) => {
 const loadReg16ImmTest = (opcode: number, name: string, reg: RegName) => {
   return instructionTest(opcode, name, { 0: 0xbb, 1: 0xaa }, (t, opcode, cpu) => {
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (3 * 4));
+    t.assert(cpu.clock.cycles === (3 * 4));
     t.assert(cpu.registers[reg] === 0xaabb);
   });
 };
@@ -133,7 +134,7 @@ const loadReg16PtrRegTest = (opcode: number, name: string, reg16: RegName, reg8:
     cpu.registers[reg16] = 0x1234;
 
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(memory.read(0x1234) === 0xaa);
   });
 };
@@ -142,7 +143,7 @@ const loadReg8Reg16PtrTest = (opcode: number, name: string, reg8: RegName, reg16
   return instructionTest(opcode, name, { 0xaabb: 0x41 }, (t, opcode, cpu) => {
     cpu.registers[reg16] = 0xaabb;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers[reg8] === 0x41);
   })
 };
@@ -152,7 +153,7 @@ const addReg16Reg16 = (opcode: number, name: string, regA: RegName, regB: RegNam
     cpu.registers[regA] = 0x1234;
     cpu.registers[regB] = 0x5678;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers[regA] === 0x68AC);
     t.assert(cpu.registers.f === 0);
 
@@ -175,7 +176,7 @@ const addSameReg16 = (opcode: number, name: string, reg: RegName) => {
   return instructionTest(opcode, name, {}, (t, opcode, cpu) => {
     cpu.registers[reg] = 0x1234;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers[reg] === 0x2468);
     t.assert(cpu.registers.f === 0);
 
@@ -196,13 +197,13 @@ const jumpRelativeIfFlag = (opcode: number, name: string, flag: Flags) => {
   return instructionTest(opcode, name, { 0: 0x10, 0x11: 0xfb, 0x12: 0xfb }, (t, opcode, cpu) => {
     cpu.registers.f = flag;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (3 * 4));
+    t.assert(cpu.clock.cycles === (3 * 4));
     t.assert(cpu.registers.pc === 0x11);
 
     cpu.registers.f = 0;
-    cpu.cycles = 0;
+    cpu.clock.cycles = 0;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers.pc === 0x12);
 
     cpu.registers.f = flag;
@@ -214,13 +215,13 @@ const jumpRelativeIfFlag = (opcode: number, name: string, flag: Flags) => {
 const jumpRelativeIfNotFlag = (opcode: number, name: string, flag: Flags) => {
   return instructionTest(opcode, name, { 0: 0x10, 0x11: 0xfb, 0x12: 0xfb }, (t, opcode, cpu) => {
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (3 * 4));
+    t.assert(cpu.clock.cycles === (3 * 4));
     t.assert(cpu.registers.pc === 0x11);
 
     cpu.registers.f = flag;
-    cpu.cycles = 0;
+    cpu.clock.cycles = 0;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers.pc === 0x12);
 
     cpu.registers.f = 0;
@@ -234,7 +235,7 @@ const addAReg8 = (opcode: number, name: string, reg: RegName) => {
     cpu.registers.a = 0x00;
     cpu.registers[reg] = 0x00;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (1 * 4));
+    t.assert(cpu.clock.cycles === (1 * 4));
     t.assert(cpu.registers.a === 0x00);
     t.assert(cpu.registers.f === Flags.Zero);
 
@@ -263,7 +264,7 @@ const adcAReg8 = (opcode: number, name: string, reg: RegName) => {
     cpu.registers.a = 0x00;
     cpu.registers[reg] = 0x00;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (1 * 4));
+    t.assert(cpu.clock.cycles === (1 * 4));
     t.assert(cpu.registers.a === 0x00);
     t.assert(cpu.registers.f === Flags.Zero);
 
@@ -294,7 +295,7 @@ const subAReg8 = (opcode: number, name: string, reg: RegName) => {
     cpu.registers.a = 0x00;
     cpu.registers[reg] = 0x00;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (1 * 4));
+    t.assert(cpu.clock.cycles === (1 * 4));
     t.assert(cpu.registers.a === 0x00);
     t.assert(cpu.registers.f === Flags.Zero);
 
@@ -323,7 +324,7 @@ const sbcAReg8 = (opcode: number, name: string, reg: RegName) => {
     cpu.registers.a = 0x00;
     cpu.registers[reg] = 0x00;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (1 * 4));
+    t.assert(cpu.clock.cycles === (1 * 4));
     t.assert(cpu.registers.a === 0x00);
     t.assert(cpu.registers.f === Flags.Zero);
 
@@ -355,7 +356,7 @@ const andAReg8 = (opcode: number, name: string, reg: RegName) => {
     cpu.registers.a = 0x00;
     cpu.registers[reg] = 0x00;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (1 * 4));
+    t.assert(cpu.clock.cycles === (1 * 4));
     t.assert(cpu.registers.a === 0x00);
     t.assert(cpu.registers.f === (Flags.Zero | Flags.HalfCarry));
 
@@ -378,7 +379,7 @@ const xorAReg8 = (opcode: number, name: string, reg: RegName) => {
     cpu.registers.a = 0x00;
     cpu.registers[reg] = 0x00;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (1 * 4));
+    t.assert(cpu.clock.cycles === (1 * 4));
     t.assert(cpu.registers.a === 0x00);
     t.assert(cpu.registers.f === Flags.Zero);
 
@@ -407,7 +408,7 @@ const orAReg8 = (opcode: number, name: string, reg: RegName) => {
     cpu.registers.a = 0x00;
     cpu.registers[reg] = 0x00;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (1 * 4));
+    t.assert(cpu.clock.cycles === (1 * 4));
     t.assert(cpu.registers.a === 0x00);
     t.assert(cpu.registers.f === Flags.Zero);
 
@@ -436,7 +437,7 @@ const cpAReg8 = (opcode: number, name: string, reg: RegName) => {
     cpu.registers.a = 0x00;
     cpu.registers[reg] = 0x00;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (1 * 4));
+    t.assert(cpu.clock.cycles === (1 * 4));
     t.assert(cpu.registers.a === 0x00);
     t.assert(cpu.registers.f === Flags.Zero);
 
@@ -466,13 +467,13 @@ const retIfNotFlag = (opcode: number, name: string, flag: Flags) => {
     cpu.registers.f = flag;
 
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers.pc === 0x0000);
 
     cpu.registers.f = 0;
-    cpu.cycles = 0;
+    cpu.clock.cycles = 0;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (5 * 4));
+    t.assert(cpu.clock.cycles === (5 * 4));
     t.assert(cpu.registers.pc === 0x1234);
   });
 };
@@ -483,13 +484,13 @@ const retIfFlag = (opcode: number, name: string, flag: Flags) => {
     cpu.registers.f = 0;
 
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (2 * 4));
+    t.assert(cpu.clock.cycles === (2 * 4));
     t.assert(cpu.registers.pc === 0x0000);
 
     cpu.registers.f = flag;
-    cpu.cycles = 0;
+    cpu.clock.cycles = 0;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (5 * 4));
+    t.assert(cpu.clock.cycles === (5 * 4));
     t.assert(cpu.registers.pc === 0x1234);
   });
 };
@@ -500,14 +501,14 @@ const callIfNotFlag = (opcode: number, name: string, flag: Flags) => {
     cpu.registers.f = flag;
 
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (3 * 4));
+    t.assert(cpu.clock.cycles === (3 * 4));
     t.assert(cpu.registers.pc === 0x0002);
     t.assert(cpu.registers.sp === 0xffff);
 
     cpu.registers.f = 0;
-    cpu.cycles = 0;
+    cpu.clock.cycles = 0;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (6 * 4));
+    t.assert(cpu.clock.cycles === (6 * 4));
     t.assert(cpu.registers.pc === 0x5678);
     t.assert(cpu.registers.sp === 0xfffd);
   });
@@ -519,14 +520,14 @@ const callIfFlag = (opcode: number, name: string, flag: Flags) => {
     cpu.registers.f = 0;
 
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (3 * 4));
+    t.assert(cpu.clock.cycles === (3 * 4));
     t.assert(cpu.registers.pc === 0x0002);
     t.assert(cpu.registers.sp === 0xffff);
 
     cpu.registers.f = flag;
-    cpu.cycles = 0;
+    cpu.clock.cycles = 0;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (6 * 4));
+    t.assert(cpu.clock.cycles === (6 * 4));
     t.assert(cpu.registers.pc === 0x5678);
     t.assert(cpu.registers.sp === 0xfffd);
   });
@@ -537,7 +538,7 @@ const popReg = (opcode: number, name: string, reg16: RegName) => {
     cpu.registers.sp = 0xfffd;
 
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (3 * 4));
+    t.assert(cpu.clock.cycles === (3 * 4));
     t.assert(cpu.registers[reg16] === 0x1234);
     t.assert(cpu.registers.sp === 0xffff);
   });
@@ -549,7 +550,7 @@ const pushReg = (opcode: number, name: string, reg16: RegName) => {
     cpu.registers[reg16] = 0x1234
 
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (4 * 4));
+    t.assert(cpu.clock.cycles === (4 * 4));
     t.assert(cpu.registers.sp === 0xfffd);
     t.assert(cpu.memory.read(cpu.registers.sp) === 0x34);
     t.assert(cpu.memory.read(cpu.registers.sp + 1) === 0x12);
@@ -560,13 +561,13 @@ const jumpIfFlag = (opcode: number, name: string, flag: Flags) => {
   return instructionTest(opcode, name, { 0: 0x34, 1: 0x12, 2: 0x78, 3: 0x56 }, (t, opcode, cpu) => {
     cpu.registers.f = 0;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (3 * 4));
+    t.assert(cpu.clock.cycles === (3 * 4));
     t.assert(cpu.registers.pc === 0x0002);
 
     cpu.registers.f = flag;
-    cpu.cycles = 0;
+    cpu.clock.cycles = 0;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (4 * 4));
+    t.assert(cpu.clock.cycles === (4 * 4));
     t.assert(cpu.registers.pc === 0x5678);
   });
 };
@@ -575,13 +576,13 @@ const jumpIfNotFlag = (opcode: number, name: string, flag: Flags) => {
   return instructionTest(opcode, name, { 0: 0x34, 1: 0x12, 2: 0x78, 3: 0x56 }, (t, opcode, cpu) => {
     cpu.registers.f = flag;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (3 * 4));
+    t.assert(cpu.clock.cycles === (3 * 4));
     t.assert(cpu.registers.pc === 0x0002);
 
     cpu.registers.f = 0;
-    cpu.cycles = 0;
+    cpu.clock.cycles = 0;
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (4 * 4));
+    t.assert(cpu.clock.cycles === (4 * 4));
     t.assert(cpu.registers.pc === 0x5678);
   });
 };
@@ -592,7 +593,7 @@ const rst = (opcode: number, name: string, offset: number) => {
     cpu.registers.sp = 0xffff;
 
     cpu.execute(opcode);
-    t.assert(cpu.cycles === (4 * 4));
+    t.assert(cpu.clock.cycles === (4 * 4));
     t.assert(cpu.registers.pc === offset);
     t.assert(cpu.registers.sp === 0xfffd);
     t.assert(cpu.memory.read(cpu.registers.sp) === 0x34);
@@ -608,7 +609,7 @@ const XX = (opcode: number, name: string) => {
 
 instructionTest(0x00, 'NOP', {}, (t, opcode, cpu) => {
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
   regs.forEach(r => t.assert(cpu.registers[r] === 0));
 });
 loadReg16ImmTest(0x01, 'LD_BC_nn', 'bc');
@@ -622,7 +623,7 @@ instructionTest(0x07, 'RLCA', {}, (t, opcode, cpu) => {
   cpu.execute(opcode);
   t.assert(cpu.registers.a === 0b01010101);
   t.assert(cpu.registers.f === Flags.Carry);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
 
   cpu.registers.a = 0b0001000;
   cpu.execute(opcode);
@@ -632,7 +633,7 @@ instructionTest(0x07, 'RLCA', {}, (t, opcode, cpu) => {
 instructionTest(0x08, 'LD_mnn_SP', { 0: 0xaa, 1: 0xbb }, (t, opcode, cpu, memory) => {
   cpu.registers.sp = 0x1234;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (5 * 4));
+  t.assert(cpu.clock.cycles === (5 * 4));
   t.assert(memory.read(0xbbaa) === 0x34);
   t.assert(memory.read(0xbbaa + 1) === 0x12);
 });
@@ -647,7 +648,7 @@ instructionTest(0x0F, 'RRCA', {}, (t, opcode, cpu) => {
   cpu.execute(opcode);
   t.assert(cpu.registers.a === 0b01010101);
   t.assert(cpu.registers.f === 0);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
 
   cpu.registers.a = 0b00001000;
   cpu.execute(opcode);
@@ -663,7 +664,7 @@ instructionTest(0x10, 'STOP', {}, (t, opcode, cpu) => {
   t.assert(!cpu.isStopped);
   cpu.execute(opcode);
   t.assert(cpu.isStopped);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
 });
 loadReg16ImmTest(0x11, 'LD_DE_nn', 'de');
 loadReg16PtrRegTest(0x12, 'LD_mDE_A', 'de', 'a');
@@ -676,7 +677,7 @@ instructionTest(0x17, 'RLA', {}, (t, opcode, cpu) => {
   cpu.execute(opcode);
   t.assert(cpu.registers.a === 0b01010100);
   t.assert(cpu.registers.f === Flags.Carry);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
 
   cpu.registers.a = 0b00001000;
   cpu.registers.f = 0;
@@ -692,7 +693,7 @@ instructionTest(0x17, 'RLA', {}, (t, opcode, cpu) => {
 });
 instructionTest(0x18, 'JR_n', { 0: 0x10, 0x11: 0xfb }, (t, opcode, cpu) => {
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (3 * 4));
+  t.assert(cpu.clock.cycles === (3 * 4));
   t.assert(cpu.registers.pc === 0x11);
 
   cpu.execute(opcode);
@@ -709,7 +710,7 @@ instructionTest(0x1F, 'RRA', {}, (t, opcode, cpu) => {
   cpu.execute(opcode);
   t.assert(cpu.registers.a === 0b01010101);
   t.assert(cpu.registers.f === 0);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
 
   cpu.registers.a = 0b00000001;
   cpu.execute(opcode);
@@ -730,7 +731,7 @@ instructionTest(0x22, 'LD_mHLp_A', {}, (t, opcode, cpu, memory) => {
   cpu.execute(opcode);
   t.assert(cpu.registers.hl === 0x1001);
   t.assert(memory.read(0x1000) === 0xaa);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
 });
 incReg16Test(0x23, 'INC_HL', 'hl');
 incReg8Test(0x24, 'INC_H', 'h');
@@ -757,7 +758,7 @@ instructionTest(0x2A, 'LD_A_mHLp', { 0x1000: 0xaa }, (t, opcode, cpu, memory) =>
   cpu.execute(opcode);
   t.assert(cpu.registers.hl === 0x1001);
   t.assert(cpu.registers.a === 0xaa);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
 });
 decReg16Test(0x2B, 'DEC_HL', 'hl');
 incReg8Test(0x2C, 'INC_L', 'l');
@@ -770,7 +771,7 @@ instructionTest(0x2F, 'CPL', {}, (t, opcode, cpu) => {
   t.assert(cpu.registers.f === (
     Flags.HalfCarry | Flags.Operation
   ));
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
 });
 jumpRelativeIfNotFlag(0x30, 'JR_NC_n', Flags.Carry);
 loadReg16ImmTest(0x31, 'LD_SP_nn', 'sp');
@@ -781,30 +782,30 @@ instructionTest(0x32, 'LD_mHLm_A', {}, (t, opcode, cpu, memory) => {
   cpu.execute(opcode);
   t.assert(cpu.registers.hl === 0x0FFF);
   t.assert(cpu.memory.read(0x1000) === 0xaa);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
 });
 incReg16Test(0x33, 'INC_SP', 'sp');
 instructionTest(0x34, 'INC_mHL', { 0x1000: 1 }, (t, opcode, cpu) => {
   cpu.registers.hl = 0x1000;
   cpu.execute(opcode);
   t.assert(cpu.memory.read(0x1000) === 2);
-  t.assert(cpu.cycles === (3 * 4));
+  t.assert(cpu.clock.cycles === (3 * 4));
 });
 instructionTest(0x35, 'DEC_mHL', { 0x1000: 1 }, (t, opcode, cpu) => {
   cpu.registers.hl = 0x1000;
   cpu.execute(opcode);
   t.assert(cpu.memory.read(0x1000) === 0);
-  t.assert(cpu.cycles === (3 * 4));
+  t.assert(cpu.clock.cycles === (3 * 4));
 });
 instructionTest(0x36, 'LD_mHL_n', { 0: 0xaa }, (t, opcode, cpu) => {
   cpu.registers.hl = 0x1000;
   cpu.execute(opcode);
   t.assert(cpu.memory.read(0x1000) === 0xaa);
-  t.assert(cpu.cycles === (3 * 4));
+  t.assert(cpu.clock.cycles === (3 * 4));
 });
 instructionTest(0x37, 'SCF', {}, (t, opcode, cpu) => {
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
   t.assert(cpu.registers.f === Flags.Carry);
 
   cpu.registers.f = Flags.Zero | Flags.HalfCarry | Flags.Operation;
@@ -819,7 +820,7 @@ instructionTest(0x3A, 'LD_A_mHLm', { 0x1000: 0xaa }, (t, opcode, cpu, memory) =>
   cpu.execute(opcode);
   t.assert(cpu.registers.hl === 0x0fff);
   t.assert(cpu.registers.a === 0xaa);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
 });
 decReg16Test(0x3B, 'DEC_SP', 'sp');
 incReg8Test(0x3C, 'INC_A', 'a');
@@ -827,7 +828,7 @@ decReg8Test(0x3D, 'DEC_A', 'a');
 loadReg8ImmTest(0x3E, 'LD_A_n', 'a');
 instructionTest(0x3F, 'CCF', {}, (t, opcode, cpu) => {
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
   t.assert(cpu.registers.f === Flags.Carry);
 
   cpu.execute(opcode);
@@ -899,22 +900,22 @@ loadHLPtrReg(0x73, 'LD_mHL_E', 'e');
 instructionTest(0x74, 'LD_mHL_H', {}, (t, opcode, cpu) => {
   cpu.registers.hl = 0xaabb;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.memory.read(0xaabb) === 0xaa);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
 });
 instructionTest(0x75, 'LD_mHL_L', {}, (t, opcode, cpu) => {
   cpu.registers.hl = 0xaabb;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.memory.read(0xaabb) === 0xbb);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
 });
 instructionTest(0x76, 'HALT', {}, (t, opcode, cpu) => {
   t.assert(!cpu.isHalted);
   cpu.execute(opcode);
   t.assert(cpu.isHalted);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
 });
 loadHLPtrReg(0x77, 'LD_mHL_A', 'a');
 loadReg8Reg8(0x78, 'LD_A_B', 'a', 'b');
@@ -937,7 +938,7 @@ instructionTest(0x86, 'ADD_A_mHL', {}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.memory.write(cpu.registers.hl, 0x00);
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -962,7 +963,7 @@ instructionTest(0x86, 'ADD_A_mHL', {}, (t, opcode, cpu) => {
 instructionTest(0x87, 'ADD_A_A', {}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -993,7 +994,7 @@ instructionTest(0x8E, 'ADC_A_mHL', {}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.memory.write(cpu.registers.hl, 0x00);
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -1021,7 +1022,7 @@ instructionTest(0x8E, 'ADC_A_mHL', {}, (t, opcode, cpu) => {
 instructionTest(0x8F, 'ADC_A_A', {}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -1053,7 +1054,7 @@ instructionTest(0x96, 'SUB_A_mHL', {}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.memory.write(cpu.registers.hl, 0x00);
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -1078,7 +1079,7 @@ instructionTest(0x96, 'SUB_A_mHL', {}, (t, opcode, cpu) => {
 instructionTest(0x97, 'SUB_A_A', {}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -1097,7 +1098,7 @@ instructionTest(0x9E, 'SUB_A_mHL', {}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.memory.write(cpu.registers.hl, 0x00);
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -1125,7 +1126,7 @@ instructionTest(0x9E, 'SUB_A_mHL', {}, (t, opcode, cpu) => {
 instructionTest(0x9F, 'SBC_A_A', {}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -1151,7 +1152,7 @@ instructionTest(0xA6, 'AND_A_mHL', {}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.memory.write(cpu.registers.hl, 0x00);
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === (Flags.Zero | Flags.HalfCarry));
 
@@ -1170,7 +1171,7 @@ instructionTest(0xA6, 'AND_A_mHL', {}, (t, opcode, cpu) => {
 instructionTest(0xA7, 'AND_A_A', {}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === (Flags.Zero | Flags.HalfCarry));
 
@@ -1189,7 +1190,7 @@ instructionTest(0xAE, 'XOR_A_mHL', {}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.memory.write(cpu.registers.hl, 0x00);
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -1214,7 +1215,7 @@ instructionTest(0xAE, 'XOR_A_mHL', {}, (t, opcode, cpu) => {
 instructionTest(0xAF, 'XOR_A_A', {}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -1233,7 +1234,7 @@ instructionTest(0xB6, 'OR_A_mHL', {}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.memory.write(cpu.registers.hl, 0x00);
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -1258,7 +1259,7 @@ instructionTest(0xB6, 'OR_A_mHL', {}, (t, opcode, cpu) => {
 instructionTest(0xB7, 'OR_A_A', {}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -1277,7 +1278,7 @@ instructionTest(0xBE, 'CP_A_mHL', {}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.memory.write(cpu.registers.hl, 0x00);
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -1302,7 +1303,7 @@ instructionTest(0xBE, 'CP_A_mHL', {}, (t, opcode, cpu) => {
 instructionTest(0xBF, 'CP_A_A', {}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -1316,7 +1317,7 @@ popReg(0xC1, 'POP_BC', 'bc');
 jumpIfNotFlag(0xC2, 'JP_NZ_nn', Flags.Zero);
 instructionTest(0xC3, 'JP_nn', { 0: 0x34, 1: 0x12 }, (t, opcode, cpu) => {
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (4 * 4));
+  t.assert(cpu.clock.cycles === (4 * 4));
   t.assert(cpu.registers.pc === 0x1234);
 });
 callIfNotFlag(0xC4, 'CALL_NZ_nn', Flags.Zero);
@@ -1325,7 +1326,7 @@ instructionTest(0xC6, 'ADD_A_n', {}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.memory.write(0, 0x00);
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -1352,25 +1353,27 @@ retIfFlag(0xC8, 'RET_Z', Flags.Zero);
 instructionTest(0xC9, 'RET', { 0xfffd: 0x34, 0xfffe: 0x12 }, (t, opcode, cpu) => {
   cpu.registers.sp = 0xfffd;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (4 * 4));
+  t.assert(cpu.clock.cycles === (4 * 4));
   t.assert(cpu.registers.pc === 0x1234);
   t.assert(cpu.registers.sp === 0xffff);
 });
 jumpIfFlag(0xCA, 'JP_Z_nn', Flags.Zero);
 instructionTest(0xCB, 'CB', {}, t => t.pass('Tested in dedicated file.'));
 callIfFlag(0xCC, 'CALL_Z_nn', Flags.Zero);
-instructionTest(0xCD, 'CALL', { 0: 0x34, 1: 0x12 }, (t, opcode, cpu) => {
+instructionTest(0xCD, 'CALL_nn', { 0: 0x34, 1: 0x12 }, (t, opcode, cpu) => {
   cpu.registers.sp = 0xffff;
 
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (6 * 4));
+  t.assert(cpu.clock.cycles === (6 * 4));
   t.assert(cpu.registers.pc === 0x1234);
   t.assert(cpu.registers.sp === 0xfffd);
+  t.assert(cpu.memory.read(cpu.registers.sp) === 0x02);
+  t.assert(cpu.memory.read(cpu.registers.sp + 1) === 0x00);
 });
 instructionTest(0xCE, 'ADC_A_n', { 0: 0, 1: 0, 2: 0x0f, 3: 0xfe }, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -1401,7 +1404,7 @@ pushReg(0xD5, 'PUSH_DE', 'de');
 instructionTest(0xD6, 'SUB_A_n', { 0: 0x00, 1: 0x01, 2: 0x0f, 3: 0x01 }, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -1427,7 +1430,7 @@ instructionTest(0xD9, 'RETI', { 0xfffd: 0x34, 0xfffe: 0x12 }, (t, opcode, cpu) =
   cpu.IME = false;
 
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (4 * 4));
+  t.assert(cpu.clock.cycles === (4 * 4));
   t.assert(cpu.registers.pc === 0x1234);
   t.assert(cpu.registers.sp === 0xffff);
   t.assert(cpu.IME);
@@ -1439,7 +1442,7 @@ XX(0xDD, 'XX2');
 instructionTest(0xDE, 'SBC_A_n', { 0: 0x00, 1: 0x00, 2: 0x0e, 3: 0x00}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -1466,7 +1469,7 @@ rst(0xDF, 'RST_18h', 0x18);
 instructionTest(0xE0, 'LD_mFFn_A', { 0: 0xaa }, (t, opcode, cpu) => {
   cpu.registers.a = 0xbb;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (3 * 4));
+  t.assert(cpu.clock.cycles === (3 * 4));
   t.assert(cpu.memory.read(0xffaa) === 0xbb);
 });
 popReg(0xE1, 'POP_HL', 'hl');
@@ -1474,7 +1477,7 @@ instructionTest(0xE2, 'LD_mFFC_A', {}, (t, opcode, cpu) => {
   cpu.registers.a = 0xbb;
   cpu.registers.c = 0xaa;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.memory.read(0xffaa) === 0xbb);
 });
 XX(0xE3, 'XX3');
@@ -1483,7 +1486,7 @@ pushReg(0xE5,  'PUSH_HL', 'hl');
 instructionTest(0xE6, 'AND_A_n', {0: 0x00, 1: 0x01, 2: 0b10111011}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === (Flags.Zero | Flags.HalfCarry));
 
@@ -1501,7 +1504,7 @@ rst(0xE7, 'RST_20h', 0x20);
 instructionTest(0xE8, 'ADD_SP_n', {0: 0x01, 1: 0xff, 2: 0x80, 3: 0x01}, (t, opcode, cpu) => {
   cpu.registers.sp = 0x1234;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (4 * 4));
+  t.assert(cpu.clock.cycles === (4 * 4));
   t.assert(cpu.registers.sp === 0x1235);
   t.assert(cpu.registers.f === Flags.HalfCarry);
 
@@ -1521,13 +1524,13 @@ instructionTest(0xE8, 'ADD_SP_n', {0: 0x01, 1: 0xff, 2: 0x80, 3: 0x01}, (t, opco
 instructionTest(0xE9, 'JP_HL', {}, (t, opcode, cpu) => {
   cpu.registers.hl = 0x1234;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
   t.assert(cpu.registers.pc === 0x1234);
 });
 instructionTest(0xEA, 'LD_mnn_A', {0: 0x34, 1: 0x12}, (t, opcode, cpu) => {
   cpu.registers.a = 0xaa;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (4 * 4));
+  t.assert(cpu.clock.cycles === (4 * 4));
   t.assert(cpu.memory.read(0x1234) === 0xaa);
 });
 XX(0xEB, 'XX5');
@@ -1536,7 +1539,7 @@ XX(0xED, 'XX7');
 instructionTest(0xEE, 'XOR_A_n', {0: 0x00, 1: 0x01, 2: 0b10111011, 3: 0xff}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -1559,20 +1562,20 @@ rst(0xEF, 'RST_28h', 0x28);
 
 instructionTest(0xF0, 'LD_A_mFFn', { 0: 0xaa, 0xffaa: 0xbb }, (t, opcode, cpu) => {
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (3 * 4));
+  t.assert(cpu.clock.cycles === (3 * 4));
   t.assert(cpu.registers.a === 0xbb);
 });
 popReg(0xF1, 'POP_AF', 'af');
 instructionTest(0xF2, 'LD_A_mFFC', {0xffaa: 0xbb}, (t, opcode, cpu) => {
   cpu.registers.c = 0xaa;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.registers.a === 0xbb);
 });
 instructionTest(0xF3, 'DI', {}, (t, opcode, cpu) => {
   cpu.IME = true;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
   t.assert(!cpu.IME);
 });
 XX(0xF4, 'XX8');
@@ -1580,7 +1583,7 @@ pushReg(0xF5,  'PUSH_AF', 'af');
 instructionTest(0xF6, 'OR_A_n', {0: 0x00, 1: 0x01, 2: 0b10011011, 3: 0xff}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 
@@ -1603,7 +1606,7 @@ rst(0xF7, 'RST_30h', 0x30);
 instructionTest(0xF8, 'LD_HL_SPn', {0: 0, 1: 1, 2: 0xff, 3: 0x80, 4: 1}, (t, opcode, cpu) => {
   cpu.registers.sp = 0x1234;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (3 * 4));
+  t.assert(cpu.clock.cycles === (3 * 4));
   t.assert(cpu.registers.hl === 0x1234);
   t.assert(cpu.registers.f === Flags.HalfCarry);
 
@@ -1627,18 +1630,18 @@ instructionTest(0xF8, 'LD_HL_SPn', {0: 0, 1: 1, 2: 0xff, 3: 0x80, 4: 1}, (t, opc
 instructionTest(0xF9, 'LD_SP_HL', {}, (t, opcode, cpu) => {
   cpu.registers.hl = 0x1234;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.registers.sp === 0x1234);
 });
 instructionTest(0xFA, 'LD_A_mnn', {0: 0x34, 1: 0x12, 0x1234: 0xaa}, (t, opcode, cpu) => {
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (4 * 4));
+  t.assert(cpu.clock.cycles === (4 * 4));
   t.assert(cpu.registers.a === 0xaa);
 });
 instructionTest(0xFB, 'EI', {}, (t, opcode, cpu) => {
   cpu.IME = false;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (1 * 4));
+  t.assert(cpu.clock.cycles === (1 * 4));
   t.assert(cpu.IME);
 });
 XX(0xFC, 'XX9');
@@ -1646,7 +1649,7 @@ XX(0xFD, 'XXA');
 instructionTest(0xFE, 'CP_A_n', {0: 0x00, 1: 0x01, 2: 0x0f, 3: 0x01}, (t, opcode, cpu) => {
   cpu.registers.a = 0x00;
   cpu.execute(opcode);
-  t.assert(cpu.cycles === (2 * 4));
+  t.assert(cpu.clock.cycles === (2 * 4));
   t.assert(cpu.registers.a === 0x00);
   t.assert(cpu.registers.f === Flags.Zero);
 

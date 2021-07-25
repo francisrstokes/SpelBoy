@@ -1,4 +1,5 @@
 import test from 'tape';
+import { Clock } from '../../src/clock';
 import { SM83 } from '../../src/sharp-sm83/index';
 import { RegName, minimalMockMemory } from './utils';
 
@@ -10,12 +11,12 @@ const pairedRegisters: RegName[][] = [
 ];
 
 test('Instaniation of SM83', t => {
-  t.doesNotThrow(() => new SM83(minimalMockMemory));
+  t.doesNotThrow(() => new SM83(minimalMockMemory, new Clock()));
   t.end();
 });
 
 test('Registers: 8-Bit', t => {
-  const cpu = new SM83(minimalMockMemory);
+  const cpu = new SM83(minimalMockMemory, new Clock());
 
   for (let [high, _, pair] of pairedRegisters) {
     cpu.registers[high] = 1;
@@ -37,7 +38,7 @@ test('Registers: 8-Bit', t => {
 });
 
 test('Registers: 16-Bit', t => {
-  const cpu = new SM83(minimalMockMemory);
+  const cpu = new SM83(minimalMockMemory, new Clock());
 
   for (let [high, low, pair] of pairedRegisters) {
     cpu.registers[pair] = 1;
