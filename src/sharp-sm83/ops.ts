@@ -1,4 +1,4 @@
-import { KeysOfType, toHexString } from './../utils';
+import { KeysOfType, toHexString, asI8 } from './../utils';
 import { SM83, Flags } from './index';
 import { IRegisters } from './registers';
 import { cbOps } from './cb';
@@ -20,25 +20,36 @@ type RegName = KeysOfType<IRegisters, number>;
   cpu.clock.tick(2 * 4);
   cpu.registers.bc++;
 };
-/* 0x04 */ const INC_B = (cpu: SM83) => {
+
+const makeInc = (reg: RegName) => (cpu: SM83) => {
   cpu.clock.tick(1 * 4);
-  cpu.registers.b++;
+  const regBefore = cpu.registers[reg];
+  cpu.registers[reg]++;
   cpu.registers.f = (
-    (cpu.registers.b === 0 ? Flags.Zero : 0)
-    | ((cpu.registers.b & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    (cpu.registers[reg] === 0 ? Flags.Zero : 0)
+    | (((regBefore & 0x0f) === 0x0f) ? Flags.HalfCarry : 0)
     | (cpu.registers.f & Flags.Carry)
   );
 };
-/* 0x05 */ const DEC_B = (cpu: SM83) => {
+
+const makeDec = (reg: RegName) => (cpu: SM83) => {
   cpu.clock.tick(1 * 4);
-  cpu.registers.b--;
+  const regBefore = cpu.registers[reg];
+  cpu.registers[reg]--;
+
+  const bValue = ~1 & 0xff
+  const halfCarry = (regBefore & 0x0f) + (bValue & 0x0f) + 1 <= 0x0f ? Flags.HalfCarry : 0;
+
   cpu.registers.f = (
-    (cpu.registers.b === 0 ? Flags.Zero : 0)
+    (cpu.registers[reg] === 0 ? Flags.Zero : 0)
     | (Flags.Operation)
-    | ((cpu.registers.b & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    | (halfCarry)
     | (cpu.registers.f & Flags.Carry)
   );
 };
+
+/* 0x04 */ const INC_B = makeInc('b');
+/* 0x05 */ const DEC_B = makeDec('b');
 /* 0x06 */ const LD_B_n = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
   cpu.registers.b = cpu.memory.read(cpu.registers.pc++);
@@ -58,10 +69,11 @@ type RegName = KeysOfType<IRegisters, number>;
 /* 0x09 */ const ADD_HL_BC = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
   const result = cpu.registers.hl + cpu.registers.bc;
+  const halfCarry = ((cpu.registers.hl & 0x0fff) + (cpu.registers.bc & 0x0fff) > 0x0fff) ? Flags.HalfCarry : 0;
   cpu.registers.hl = result;
   cpu.registers.f = (
     (cpu.registers.f & Flags.Zero)
-    | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    | (halfCarry)
     | (result > 0xffff ? Flags.Carry : 0)
   );
 };
@@ -73,25 +85,8 @@ type RegName = KeysOfType<IRegisters, number>;
   cpu.clock.tick(2 * 4);
   cpu.registers.bc--;
 };
-/* 0x0C */ const INC_C = (cpu: SM83) => {
-  cpu.clock.tick(1 * 4);
-  cpu.registers.c++;
-  cpu.registers.f = (
-    (cpu.registers.c === 0 ? Flags.Zero : 0)
-    | ((cpu.registers.c & 0x10) === 0x10 ? Flags.HalfCarry : 0)
-    | (cpu.registers.f & Flags.Carry)
-  );
-};
-/* 0x0D */ const DEC_C = (cpu: SM83) => {
-  cpu.clock.tick(1 * 4);
-  cpu.registers.c--;
-  cpu.registers.f = (
-    (cpu.registers.c === 0 ? Flags.Zero : 0)
-    | (Flags.Operation)
-    | ((cpu.registers.c & 0x10) === 0x10 ? Flags.HalfCarry : 0)
-    | (cpu.registers.f & Flags.Carry)
-  );
-};
+/* 0x0C */ const INC_C = makeInc('c');
+/* 0x0D */ const DEC_C = makeDec('c');
 /* 0x0E */ const LD_C_n = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
   cpu.registers.c = cpu.memory.read(cpu.registers.pc++);
@@ -105,6 +100,24 @@ type RegName = KeysOfType<IRegisters, number>;
 /* 0x10 */ const STOP = (cpu: SM83) => {
   cpu.isStopped = true;
   cpu.clock.tick(1 * 4);
+
+  const interruptPending = cpu.interruptIsPending();
+  if (cpu.input.anyButtonIsHeld()) {
+    if (interruptPending) {
+      return;
+    } else {
+      cpu.registers.pc++;
+      cpu.isHalted = true;
+      return;
+    }
+  }
+
+  if (interruptPending) {
+    cpu.registers.pc++;
+    cpu.isHalted = true;
+    cpu.timer.resetDIV();
+    return;
+  }
 };
 /* 0x11 */ const LD_DE_nn = (cpu: SM83) => {
   cpu.clock.tick(3 * 4);
@@ -118,25 +131,8 @@ type RegName = KeysOfType<IRegisters, number>;
   cpu.clock.tick(2 * 4);
   cpu.registers.de++;
 };
-/* 0x14 */ const INC_D = (cpu: SM83) => {
-  cpu.clock.tick(1 * 4);
-  cpu.registers.d++;
-  cpu.registers.f = (
-    (cpu.registers.d === 0 ? Flags.Zero : 0)
-    | ((cpu.registers.d & 0x10) === 0x10 ? Flags.HalfCarry : 0)
-    | (cpu.registers.f & Flags.Carry)
-  );
-};
-/* 0x15 */ const DEC_D = (cpu: SM83) => {
-  cpu.clock.tick(1 * 4);
-  cpu.registers.d--;
-  cpu.registers.f = (
-    (cpu.registers.d === 0 ? Flags.Zero : 0)
-    | (Flags.Operation)
-    | ((cpu.registers.d & 0x10) === 0x10 ? Flags.HalfCarry : 0)
-    | (cpu.registers.f & Flags.Carry)
-  );
-};
+/* 0x14 */ const INC_D = makeInc('d');
+/* 0x15 */ const DEC_D = makeDec('d');
 /* 0x16 */ const LD_D_n = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
   cpu.registers.d = cpu.memory.read(cpu.registers.pc++);
@@ -155,10 +151,11 @@ type RegName = KeysOfType<IRegisters, number>;
 /* 0x19 */ const ADD_HL_DE = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
   const result = cpu.registers.hl + cpu.registers.de;
+  const halfCarry = ((cpu.registers.hl & 0x0fff) + (cpu.registers.de & 0x0fff) > 0x0fff) ? Flags.HalfCarry : 0;
   cpu.registers.hl = result;
   cpu.registers.f = (
     (cpu.registers.f & Flags.Zero)
-    | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    | (halfCarry)
     | (result > 0xffff ? Flags.Carry : 0)
   );
 };
@@ -170,25 +167,8 @@ type RegName = KeysOfType<IRegisters, number>;
   cpu.clock.tick(2 * 4);
   cpu.registers.de--;
 };
-/* 0x1C */ const INC_E = (cpu: SM83) => {
-  cpu.clock.tick(1 * 4);
-  cpu.registers.e++;
-  cpu.registers.f = (
-    (cpu.registers.e === 0 ? Flags.Zero : 0)
-    | ((cpu.registers.e & 0x10) === 0x10 ? Flags.HalfCarry : 0)
-    | (cpu.registers.f & Flags.Carry)
-  );
-};
-/* 0x1D */ const DEC_E = (cpu: SM83) => {
-  cpu.clock.tick(1 * 4);
-  cpu.registers.e--;
-  cpu.registers.f = (
-    (cpu.registers.e === 0 ? Flags.Zero : 0)
-    | (Flags.Operation)
-    | ((cpu.registers.e & 0x10) === 0x10 ? Flags.HalfCarry : 0)
-    | (cpu.registers.f & Flags.Carry)
-  );
-};
+/* 0x1C */ const INC_E = makeInc('e');
+/* 0x1D */ const DEC_E = makeDec('e');
 /* 0x1E */ const LD_E_n = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
   cpu.registers.e = cpu.memory.read(cpu.registers.pc++);
@@ -220,25 +200,8 @@ type RegName = KeysOfType<IRegisters, number>;
   cpu.clock.tick(2 * 4);
   cpu.registers.hl++;
 };
-/* 0x24 */ const INC_H = (cpu: SM83) => {
-  cpu.clock.tick(1 * 4);
-  cpu.registers.h++;
-  cpu.registers.f = (
-    (cpu.registers.h === 0 ? Flags.Zero : 0)
-    | ((cpu.registers.h & 0x10) === 0x10 ? Flags.HalfCarry : 0)
-    | (cpu.registers.f & Flags.Carry)
-  );
-};
-/* 0x25 */ const DEC_H = (cpu: SM83) => {
-  cpu.clock.tick(1 * 4);
-  cpu.registers.h--;
-  cpu.registers.f = (
-    (cpu.registers.h === 0 ? Flags.Zero : 0)
-    | (Flags.Operation)
-    | ((cpu.registers.h & 0x10) === 0x10 ? Flags.HalfCarry : 0)
-    | (cpu.registers.f & Flags.Carry)
-  );
-};
+/* 0x24 */ const INC_H = makeInc('h');
+/* 0x25 */ const DEC_H = makeDec('h');
 /* 0x26 */ const LD_H_n = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
   cpu.registers.h = cpu.memory.read(cpu.registers.pc++);
@@ -255,13 +218,13 @@ type RegName = KeysOfType<IRegisters, number>;
   const operationSet = (flags & Flags.Operation) === Flags.Operation;
   const carrySet = (flags & Flags.Carry) === Flags.Carry;
 
-  if (halfCarrySet || (!operationSet && cpu.registers.a > 0x09)) {
+  if (halfCarrySet || (!operationSet && (cpu.registers.a & 0x0f) > 0x09)) {
     correction = 0x06;
   }
 
   if (carrySet || (!operationSet && cpu.registers.a > 0x99)) {
     correction |= 0x60;
-    cpu.registers.f = Flags.Carry;
+    cpu.registers.f |= Flags.Carry;
   }
 
   cpu.registers.a += operationSet ? -correction : correction;
@@ -278,10 +241,11 @@ type RegName = KeysOfType<IRegisters, number>;
 /* 0x29 */ const ADD_HL_HL = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
   const result = cpu.registers.hl + cpu.registers.hl;
+  const halfCarry = ((cpu.registers.hl & 0x0fff) * 2 > 0x0fff) ? Flags.HalfCarry : 0;
   cpu.registers.hl = result;
   cpu.registers.f = (
     (cpu.registers.f & Flags.Zero)
-    | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    | (halfCarry)
     | (result > 0xffff ? Flags.Carry : 0)
   );
 };
@@ -293,25 +257,8 @@ type RegName = KeysOfType<IRegisters, number>;
   cpu.clock.tick(2 * 4);
   cpu.registers.hl--;
 };
-/* 0x2C */ const INC_L = (cpu: SM83) => {
-  cpu.clock.tick(1 * 4);
-  cpu.registers.l++;
-  cpu.registers.f = (
-    (cpu.registers.l === 0 ? Flags.Zero : 0)
-    | ((cpu.registers.l & 0x10) === 0x10 ? Flags.HalfCarry : 0)
-    | (cpu.registers.f & Flags.Carry)
-  );
-};
-/* 0x2D */ const DEC_L = (cpu: SM83) => {
-  cpu.clock.tick(1 * 4);
-  cpu.registers.l--;
-  cpu.registers.f = (
-    (cpu.registers.l === 0 ? Flags.Zero : 0)
-    | (Flags.Operation)
-    | ((cpu.registers.l & 0x10) === 0x10 ? Flags.HalfCarry : 0)
-    | (cpu.registers.f & Flags.Carry)
-  );
-};
+/* 0x2C */ const INC_L = makeInc('l');
+/* 0x2D */ const DEC_L = makeDec('l');
 /* 0x2E */ const LD_L_n = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
   cpu.registers.l = cpu.memory.read(cpu.registers.pc++);
@@ -320,7 +267,8 @@ type RegName = KeysOfType<IRegisters, number>;
   cpu.clock.tick(1 * 4);
   cpu.registers.a = ~cpu.registers.a;
   cpu.registers.f = (
-    Flags.HalfCarry | Flags.Operation
+    (cpu.registers.f & (Flags.Carry | Flags.Zero))
+    | Flags.HalfCarry | Flags.Operation
   );
 };
 /* 0x30 */ const JR_NC_n = (cpu: SM83) => {
@@ -345,28 +293,35 @@ type RegName = KeysOfType<IRegisters, number>;
 };
 /* 0x34 */ const INC_mHL = (cpu: SM83) => {
   cpu.clock.tick(3 * 4);
-  const value = cpu.memory.read(cpu.registers.hl) + 1;
+  const memValue = cpu.memory.read(cpu.registers.hl);
+  const value = memValue + 1;
   cpu.memory.write(cpu.registers.hl, value);
+
   cpu.registers.f = (
-    (value === 0 ? Flags.Zero : 0)
-    | ((value & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    ((value & 0xff) === 0 ? Flags.Zero : 0)
+    | ((memValue & 0x0f) === 0x0f ? Flags.HalfCarry : 0)
     | (cpu.registers.f & Flags.Carry)
   );
 };
 /* 0x35 */ const DEC_mHL = (cpu: SM83) => {
   cpu.clock.tick(3 * 4);
-  const value = cpu.memory.read(cpu.registers.hl) - 1;
+
+  const memValue = cpu.memory.read(cpu.registers.hl);
+  const value = memValue - 1;
   cpu.memory.write(cpu.registers.hl, value);
+  const bValue = ~1 & 0xff
+  const halfCarry = (memValue & 0x0f) + (bValue & 0x0f) + 1 <= 0x0f ? Flags.HalfCarry : 0;
+
   cpu.registers.f = (
     (value === 0 ? Flags.Zero : 0)
     | (Flags.Operation)
-    | ((value & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    | (halfCarry)
     | (cpu.registers.f & Flags.Carry)
   );
 };
 /* 0x36 */ const LD_mHL_n = (cpu: SM83) => {
   cpu.clock.tick(3 * 4);
-  cpu.memory.write(cpu.registers.hl++, cpu.memory.read(cpu.registers.pc++));
+  cpu.memory.write(cpu.registers.hl, cpu.memory.read(cpu.registers.pc++));
 };
 /* 0x37 */ const SCF = (cpu: SM83) => {
   cpu.clock.tick(1 * 4);
@@ -384,10 +339,14 @@ type RegName = KeysOfType<IRegisters, number>;
 /* 0x39 */ const ADD_HL_SP = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
   const result = cpu.registers.hl + cpu.registers.sp;
+  // In these 16 bit add instructions, the half carry is recorded as the result of the second
+  // *8-bit* add that takes place in the ALU - which is why overflow is checked for bit 11 rather
+  // than for bit 3
+  const halfCarry = ((cpu.registers.hl & 0x0fff) + (cpu.registers.sp & 0x0fff) > 0x0fff) ? Flags.HalfCarry : 0;
   cpu.registers.hl = result;
   cpu.registers.f = (
     (cpu.registers.f & Flags.Zero)
-    | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    | (halfCarry)
     | (result > 0xffff ? Flags.Carry : 0)
   );
 };
@@ -399,25 +358,8 @@ type RegName = KeysOfType<IRegisters, number>;
   cpu.clock.tick(2 * 4);
   cpu.registers.sp--;
 };
-/* 0x3C */ const INC_A = (cpu: SM83) => {
-  cpu.clock.tick(1 * 4);
-  cpu.registers.a++;
-  cpu.registers.f = (
-    (cpu.registers.a === 0 ? Flags.Zero : 0)
-    | ((cpu.registers.a & 0x10) === 0x10 ? Flags.HalfCarry : 0)
-    | (cpu.registers.f & Flags.Carry)
-  );
-};
-/* 0x3D */ const DEC_A = (cpu: SM83) => {
-  cpu.clock.tick(1 * 4);
-  cpu.registers.a--;
-  cpu.registers.f = (
-    (cpu.registers.a === 0 ? Flags.Zero : 0)
-    | (Flags.Operation)
-    | ((cpu.registers.a & 0x10) === 0x10 ? Flags.HalfCarry : 0)
-    | (cpu.registers.f & Flags.Carry)
-  );
-};
+/* 0x3C */ const INC_A = makeInc('a');
+/* 0x3D */ const DEC_A = makeDec('a');
 /* 0x3E */ const LD_A_n = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
   cpu.registers.a = cpu.memory.read(cpu.registers.pc++);
@@ -425,9 +367,9 @@ type RegName = KeysOfType<IRegisters, number>;
 /* 0x3F */ const CCF = (cpu: SM83) => {
   cpu.clock.tick(1 * 4);
   const carry = (cpu.registers.f & Flags.Carry) >> Flags.CarryBit;
-  const flags = cpu.registers.f & ~Flags.Carry;
   cpu.registers.f = (
-    flags | (carry ? 0 : Flags.Carry)
+    (cpu.registers.f & Flags.Zero)
+    | (carry ? 0 : Flags.Carry)
   );
 };
 /* 0x40 */ const LD_B_B = NOP;
@@ -633,6 +575,11 @@ type RegName = KeysOfType<IRegisters, number>;
 };
 /* 0x76 */ const HALT = (cpu: SM83) => {
   cpu.isHalted = true;
+
+  if (!cpu.IME && !cpu.interruptIsPending()) {
+    cpu.haltBugEffects = true;
+  }
+
   cpu.clock.tick(1 * 4);
 };
 /* 0x77 */ const LD_mHL_A = (cpu: SM83) => {
@@ -672,10 +619,13 @@ type RegName = KeysOfType<IRegisters, number>;
 const makeAddA = (reg: RegName) => (cpu: SM83) => {
   cpu.clock.tick(1 * 4);
   const result = cpu.registers.a + cpu.registers[reg];
+  const halfCarry = ((cpu.registers.a & 0x0f) + (cpu.registers[reg] & 0x0f) > 0x0f) ? Flags.HalfCarry : 0;
   cpu.registers.a = result;
+
   cpu.registers.f = (
     (cpu.registers.a === 0 ? Flags.Zero : 0)
-    | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    | halfCarry
+    // | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
     | (result > 0xff ? Flags.Carry : 0)
   );
 };
@@ -684,10 +634,12 @@ const makeAdcA = (reg: RegName) => (cpu: SM83) => {
   cpu.clock.tick(1 * 4);
   const carry = (cpu.registers.f & Flags.Carry) >> Flags.CarryBit;
   const result = cpu.registers.a + cpu.registers[reg] + carry;
+  const halfCarry = ((cpu.registers.a & 0x0f) + (cpu.registers[reg] & 0x0f) + carry > 0x0f) ? Flags.HalfCarry : 0;
   cpu.registers.a = result;
   cpu.registers.f = (
     (cpu.registers.a === 0 ? Flags.Zero : 0)
-    | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    | halfCarry
+    // | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
     | (result > 0xff ? Flags.Carry : 0)
   );
 };
@@ -700,11 +652,14 @@ const makeAdcA = (reg: RegName) => (cpu: SM83) => {
 /* 0x85 */ const ADD_A_L = makeAddA('l');
 /* 0x86 */ const ADD_A_mHL = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
-  const result = cpu.registers.a + cpu.memory.read(cpu.registers.hl);
+  const hlValue = cpu.memory.read(cpu.registers.hl);
+  const result = cpu.registers.a + hlValue;
+  const halfCarry = ((cpu.registers.a & 0x0f) + (hlValue & 0x0f) > 0x0f) ? Flags.HalfCarry : 0;
   cpu.registers.a = result;
   cpu.registers.f = (
     (cpu.registers.a === 0 ? Flags.Zero : 0)
-    | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    | halfCarry
+    // | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
     | (result > 0xff ? Flags.Carry : 0)
   );
 };
@@ -718,11 +673,14 @@ const makeAdcA = (reg: RegName) => (cpu: SM83) => {
 /* 0x8E */ const ADC_A_mHL = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
   const carry = (cpu.registers.f & Flags.Carry) >> Flags.CarryBit;
-  const result = cpu.registers.a + cpu.memory.read(cpu.registers.hl) + carry;
+  const hlValue = cpu.memory.read(cpu.registers.hl);
+  const halfCarry = ((cpu.registers.a & 0x0f) + (hlValue & 0x0f) + carry > 0x0f) ? Flags.HalfCarry : 0;
+  const result = cpu.registers.a + hlValue + carry;
   cpu.registers.a = result;
   cpu.registers.f = (
     (cpu.registers.a === 0 ? Flags.Zero : 0)
-    | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    | halfCarry
+    // | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
     | (result > 0xff ? Flags.Carry : 0)
   );
 };
@@ -731,23 +689,30 @@ const makeAdcA = (reg: RegName) => (cpu: SM83) => {
 const makeSubA = (reg: RegName) => (cpu: SM83) => {
   cpu.clock.tick(1 * 4);
   const result = cpu.registers.a - cpu.registers[reg];
+  const halfCarry = (cpu.registers.a & 0x0f) + (~cpu.registers[reg] & 0x0f) + 1 <= 0x0f ? Flags.HalfCarry : 0;
   cpu.registers.a = result;
   cpu.registers.f = (
     (cpu.registers.a === 0 ? Flags.Zero : 0)
-    | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    | (halfCarry)
     | (result < 0 ? Flags.Carry : 0)
+    | Flags.Operation
   );
 };
 
 const makeSbcA = (reg: RegName) => (cpu: SM83) => {
   cpu.clock.tick(1 * 4);
-  const carry = (cpu.registers.f & Flags.Carry) >> Flags.CarryBit;
-  const result = cpu.registers.a - cpu.registers[reg] - carry;
+
+  const carry = ((cpu.registers.f & Flags.Carry) >> Flags.CarryBit) ? 0 : 1;
+  const bValue = ~cpu.registers[reg] & 0xff;
+  const result = cpu.registers.a + bValue + carry;
+  const halfCarry = (cpu.registers.a & 0x0f) + (bValue & 0x0f) + carry <= 0x0f ? Flags.HalfCarry : 0;
   cpu.registers.a = result;
+
   cpu.registers.f = (
     (cpu.registers.a === 0 ? Flags.Zero : 0)
-    | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
-    | (result < 0 ? Flags.Carry : 0)
+    | (halfCarry)
+    | (result <= 0xff ? Flags.Carry : 0)
+    | Flags.Operation
   );
 };
 
@@ -759,12 +724,16 @@ const makeSbcA = (reg: RegName) => (cpu: SM83) => {
 /* 0x95 */ const SUB_A_L = makeSubA('l');
 /* 0x96 */ const SUB_A_mHL = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
-  const result = cpu.registers.a - cpu.memory.read(cpu.registers.hl);
+  const memValue = cpu.memory.read(cpu.registers.hl)
+  const result = cpu.registers.a - memValue;
+  const halfCarry = (cpu.registers.a & 0x0f) + (~memValue & 0x0f) + 1 <= 0x0f ? Flags.HalfCarry : 0;
+
   cpu.registers.a = result;
   cpu.registers.f = (
     (cpu.registers.a === 0 ? Flags.Zero : 0)
-    | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    | (halfCarry)
     | (result < 0 ? Flags.Carry : 0)
+    | Flags.Operation
   );
 };
 /* 0x97 */ const SUB_A_A = makeSubA('a');
@@ -776,13 +745,17 @@ const makeSbcA = (reg: RegName) => (cpu: SM83) => {
 /* 0x9D */ const SBC_A_L = makeSbcA('l');
 /* 0x9E */ const SBC_A_mHL = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
-  const carry = (cpu.registers.f & Flags.Carry) >> Flags.CarryBit;
-  const result = cpu.registers.a - cpu.memory.read(cpu.registers.hl) - carry;
+  const carry = ((cpu.registers.f & Flags.Carry) >> Flags.CarryBit) ? 0 : 1;
+  const bValue = ~cpu.memory.read(cpu.registers.hl) & 0xff;
+  const result = cpu.registers.a + bValue + carry;
+  const halfCarry = (cpu.registers.a & 0x0f) + (bValue & 0x0f) + carry <= 0x0f ? Flags.HalfCarry : 0;
   cpu.registers.a = result;
+
   cpu.registers.f = (
     (cpu.registers.a === 0 ? Flags.Zero : 0)
-    | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
-    | (result < 0 ? Flags.Carry : 0)
+    | (halfCarry)
+    | (result <= 0xff ? Flags.Carry : 0)
+    | Flags.Operation
   );
 };
 /* 0x9F */ const SBC_A_A = makeSbcA('a');
@@ -831,7 +804,6 @@ const makeXorA = (reg: RegName) => (cpu: SM83) => {
   cpu.registers.a ^= cpu.memory.read(cpu.registers.hl);
   cpu.registers.f = (
     (cpu.registers.a === 0 ? Flags.Zero : 0)
-    | ((cpu.registers.a & 0x10) === 0x10 ? Flags.HalfCarry : 0)
   );
 };
 /* 0xAF */ const XOR_A_A = makeXorA('a');
@@ -855,17 +827,19 @@ const makeOrA = (reg: RegName) => (cpu: SM83) => {
   cpu.registers.a |= cpu.memory.read(cpu.registers.hl);
   cpu.registers.f = (
     (cpu.registers.a === 0 ? Flags.Zero : 0)
-    | ((cpu.registers.a & 0x10) === 0x10 ? Flags.HalfCarry : 0)
   );
 };
 /* 0xB7 */ const OR_A_A = makeOrA('a');
 
 const makeCpA = (reg: RegName) => (cpu: SM83) => {
   cpu.clock.tick(1 * 4);
+  const halfCarry = (cpu.registers.a & 0x0f) + (~cpu.registers[reg] & 0x0f) + 1 <= 0x0f ? Flags.HalfCarry : 0;
   const result = cpu.registers.a - cpu.registers[reg];
+
   cpu.registers.f = (
     ((result & 0xff) === 0 ? Flags.Zero : 0)
-    | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    | (Flags.Operation)
+    | (halfCarry)
     | (result < 0 ? Flags.Carry : 0)
   );
 };
@@ -878,10 +852,14 @@ const makeCpA = (reg: RegName) => (cpu: SM83) => {
 /* 0xBD */ const CP_A_L = makeCpA('l');
 /* 0xBE */ const CP_A_mHL = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
-  const result = cpu.registers.a - cpu.memory.read(cpu.registers.hl);
+  const memValue = cpu.memory.read(cpu.registers.hl)
+  const result = cpu.registers.a - memValue;
+  const halfCarry = (cpu.registers.a & 0x0f) + (~memValue & 0x0f) + 1 <= 0x0f ? Flags.HalfCarry : 0;
+
   cpu.registers.f = (
     ((result & 0xff) === 0 ? Flags.Zero : 0)
-    | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    | (Flags.Operation)
+    | (halfCarry)
     | (result < 0 ? Flags.Carry : 0)
   );
 };
@@ -931,11 +909,14 @@ const makeCpA = (reg: RegName) => (cpu: SM83) => {
 };
 /* 0xC6 */ const ADD_A_n = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
-  const result = cpu.registers.a + cpu.memory.read(cpu.registers.pc++);
+  const memValue = cpu.memory.read(cpu.registers.pc++);
+  const result = cpu.registers.a + memValue;
+  const halfCarry = ((cpu.registers.a & 0x0f) + (memValue & 0x0f) > 0x0f) ? Flags.HalfCarry : 0;
+
   cpu.registers.a = result;
   cpu.registers.f = (
     (cpu.registers.a === 0 ? Flags.Zero : 0)
-    | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    | (halfCarry)
     | (result > 0xff ? Flags.Carry : 0)
   );
 };
@@ -996,11 +977,13 @@ const makeRst = (offset: number) => (cpu: SM83) => {
 /* 0xCE */ const ADC_A_n = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
   const carry = (cpu.registers.f & Flags.Carry) >> Flags.CarryBit;
-  const result = cpu.registers.a + cpu.memory.read(cpu.registers.pc++) + carry;
+  const memValue = cpu.memory.read(cpu.registers.pc++);
+  const result = cpu.registers.a + memValue + carry;
+  const halfCarry = ((cpu.registers.a & 0x0f) + (memValue & 0x0f) + carry > 0x0f) ? Flags.HalfCarry : 0;
   cpu.registers.a = result;
   cpu.registers.f = (
     (cpu.registers.a === 0 ? Flags.Zero : 0)
-    | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    | (halfCarry)
     | (result > 0xff ? Flags.Carry : 0)
   );
 };
@@ -1048,11 +1031,16 @@ const makeRst = (offset: number) => (cpu: SM83) => {
 };
 /* 0xD6 */ const SUB_A_n = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
-  const result = cpu.registers.a - cpu.memory.read(cpu.registers.pc++);
+
+  const memValue = cpu.memory.read(cpu.registers.pc++);
+  const result = cpu.registers.a - memValue;
+  const halfCarry = (cpu.registers.a & 0x0f) + (~memValue & 0x0f) + 1 <= 0x0f ? Flags.HalfCarry : 0;
   cpu.registers.a = result;
+
   cpu.registers.f = (
     (cpu.registers.a === 0 ? Flags.Zero : 0)
-    | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    | (Flags.Operation)
+    | (halfCarry)
     | (result < 0 ? Flags.Carry : 0)
   );
 };
@@ -1070,6 +1058,7 @@ const makeRst = (offset: number) => (cpu: SM83) => {
   cpu.registers.pc = cpu.memory.read(cpu.registers.sp) | cpu.memory.read(cpu.registers.sp + 1) << 8;
   cpu.registers.sp += 2;
   cpu.IME = true;
+  cpu.delayedIME = true;
 };
 /* 0xDA */ const JP_C_nn = (cpu: SM83) => {
   cpu.clock.tick(3 * 4);
@@ -1094,13 +1083,18 @@ const makeRst = (offset: number) => (cpu: SM83) => {
 /* 0xDD */ const XX2 = NOP;
 /* 0xDE */ const SBC_A_n = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
-  const carry = (cpu.registers.f & Flags.Carry) >> Flags.CarryBit;
-  const result = cpu.registers.a - cpu.memory.read(cpu.registers.pc++) - carry;
+
+  const carry = ((cpu.registers.f & Flags.Carry) >> Flags.CarryBit) ? 0 : 1;
+  const memValue = ~cpu.memory.read(cpu.registers.pc++) & 0xff;
+  const result = cpu.registers.a + memValue + carry;
+  const halfCarry = (cpu.registers.a & 0x0f) + (memValue & 0x0f) + carry <= 0x0f ? Flags.HalfCarry : 0;
   cpu.registers.a = result;
+
   cpu.registers.f = (
     (cpu.registers.a === 0 ? Flags.Zero : 0)
-    | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
-    | (result < 0 ? Flags.Carry : 0)
+    | (Flags.Operation)
+    | (halfCarry)
+    | (result <= 0xff ? Flags.Carry : 0)
   );
 };
 /* 0xDF */ const RST_18h = makeRst(0x18);
@@ -1140,11 +1134,17 @@ const makeRst = (offset: number) => (cpu: SM83) => {
 /* 0xE8 */ const ADD_SP_n = (cpu: SM83) => {
   cpu.clock.tick(4 * 4);
   const n = cpu.memory.read(cpu.registers.pc++);
-  const result = cpu.registers.sp + ((n & 0x80 ? 0xff00 : 0) | n);
-  cpu.registers.sp = result;
+  // Carry is computed based on the *first* 8 bit addition of the full
+  // 16 bit add. Likewise here, the carry is also based on that first addition
+  // rather than the second addition like in other 16-bit adds.
+  const spLower = cpu.registers.sp & 0xff;
+  const halfCarry = ((cpu.registers.sp & 0x0f) + (n & 0x0f) > 0x0f) ? Flags.HalfCarry : 0;
+  const signExtended = ((n & 0x80 ? 0xff00 : 0) | n);
+
+  cpu.registers.sp = cpu.registers.sp + signExtended;
   cpu.registers.f = (
-    ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
-    | (result > 0xffff ? Flags.Carry : 0)
+    (halfCarry)
+    | ((spLower + n) > 0xff ? Flags.Carry : 0)
   );
 };
 /* 0xE9 */ const JP_HL = (cpu: SM83) => {
@@ -1173,7 +1173,7 @@ const makeRst = (offset: number) => (cpu: SM83) => {
 };
 /* 0xF1 */ const POP_AF = (cpu: SM83) => {
   cpu.clock.tick(3 * 4);
-  cpu.registers.af = cpu.memory.read(cpu.registers.sp) | cpu.memory.read(cpu.registers.sp + 1) << 8;
+  cpu.registers.af = (cpu.memory.read(cpu.registers.sp) & 0xf0) | cpu.memory.read(cpu.registers.sp + 1) << 8;
   cpu.registers.sp += 2;
 };
 /* 0xF2 */ const LD_A_mFFC = (cpu: SM83) => {
@@ -1183,7 +1183,7 @@ const makeRst = (offset: number) => (cpu: SM83) => {
 };
 /* 0xF3 */ const DI = (cpu: SM83) => {
   cpu.clock.tick(1 * 4);
-  cpu.IME = false;
+  cpu.delayedIME = false;
 };
 /* 0xF4 */ const XX8 = NOP;
 /* 0xF5 */ const PUSH_AF = (cpu: SM83) => {
@@ -1203,11 +1203,19 @@ const makeRst = (offset: number) => (cpu: SM83) => {
 /* 0xF8 */ const LD_HL_SPn = (cpu: SM83) => {
   cpu.clock.tick(3 * 4);
   const n = cpu.memory.read(cpu.registers.pc++);
-  const addr = cpu.registers.sp + ((n & 0x80 ? 0xff00 : 0) | n);
+
+  // Carry is computed based on the *first* 8 bit addition of the full
+  // 16 bit add. Likewise here, the carry is also based on that first addition
+  // rather than the second addition like in other 16-bit adds.
+  const spLower = cpu.registers.sp & 0xff;
+  const halfCarry = ((cpu.registers.sp & 0x0f) + (n & 0x0f) > 0x0f) ? Flags.HalfCarry : 0;
+  const signExtended = ((n & 0x80 ? 0xff00 : 0) | n);
+
+  const addr = cpu.registers.sp + signExtended;
   cpu.registers.hl = addr & 0xffff;
   cpu.registers.f = (
-    ((addr & 0x10) === 0x10 ? Flags.HalfCarry : 0)
-    | (addr > 0xffff ? Flags.Carry : 0)
+    (halfCarry)
+    | ((spLower + n) > 0xff ? Flags.Carry : 0)
   );
 };
 /* 0xF9 */ const LD_SP_HL = (cpu: SM83) => {
@@ -1221,16 +1229,20 @@ const makeRst = (offset: number) => (cpu: SM83) => {
 };
 /* 0xFB */ const EI = (cpu: SM83) => {
   cpu.clock.tick(1 * 4);
-  cpu.IME = true;
+  cpu.delayedIME = true;
 };
 /* 0xFC */ const XX9 = NOP;
 /* 0xFD */ const XXA = NOP;
 /* 0xFE */ const CP_A_n = (cpu: SM83) => {
   cpu.clock.tick(2 * 4);
-  const result = cpu.registers.a - cpu.memory.read(cpu.registers.pc++);
+  const memValue = cpu.memory.read(cpu.registers.pc++);
+  const result = cpu.registers.a - memValue;
+  const halfCarry = (cpu.registers.a & 0x0f) + (~memValue & 0x0f) + 1 <= 0x0f ? Flags.HalfCarry : 0;
+
   cpu.registers.f = (
     ((result & 0xff) === 0 ? Flags.Zero : 0)
-    | ((result & 0x10) === 0x10 ? Flags.HalfCarry : 0)
+    | (Flags.Operation)
+    | (halfCarry)
     | (result < 0 ? Flags.Carry : 0)
   );
 };

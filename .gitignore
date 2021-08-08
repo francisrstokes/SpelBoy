@@ -3,3 +3,8 @@
 node_modules/
 .vscode.
 dist/
+
+dumps/
+*.bin
+*.gb
+test-roms/

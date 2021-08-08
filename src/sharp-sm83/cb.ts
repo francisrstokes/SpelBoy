@@ -9,7 +9,7 @@ const makeRlc = (reg: RegName) => (cpu: SM83) => {
   const carry = cpu.registers[reg] >> 7;
   cpu.registers[reg] = (cpu.registers[reg] << 1) | carry;
   cpu.registers.f = (
-    carry ? Flags.Carry : 0
+    (carry ? Flags.Carry : 0)
     | (cpu.registers[reg] === 0 ? Flags.Zero : 0)
   );
 };
@@ -19,7 +19,7 @@ const makeRrc = (reg: RegName) => (cpu: SM83) => {
   const carry = cpu.registers[reg] & 0x01;
   cpu.registers[reg] = (carry << 7) | (cpu.registers[reg] >> 1);
   cpu.registers.f = (
-    carry ? Flags.Carry : 0
+    (carry ? Flags.Carry : 0)
     | (cpu.registers[reg] === 0 ? Flags.Zero : 0)
   );
 };
@@ -60,7 +60,7 @@ const makeSra = (reg: RegName) => (cpu: SM83) => {
   const signMask = cpu.registers[reg] & 0x80;
   cpu.registers[reg] = signMask | (cpu.registers[reg] >> 1);
   cpu.registers.f = (
-    carry ? Flags.Carry : 0
+    (carry ? Flags.Carry : 0)
     | (cpu.registers[reg] === 0 ? Flags.Zero : 0)
   );
 };
@@ -70,7 +70,7 @@ const makeSrl = (reg: RegName) => (cpu: SM83) => {
   const carry = cpu.registers[reg] & 0x01;
   cpu.registers[reg] = cpu.registers[reg] >> 1;
   cpu.registers.f = (
-    carry ? Flags.Carry : 0
+    (carry ? Flags.Carry : 0)
     | (cpu.registers[reg] === 0 ? Flags.Zero : 0)
   );
 };
@@ -140,7 +140,7 @@ const makeSetHL = (i: number) => (cpu: SM83) => {
   const newValue = ((value << 1) | carry) & 0xff;
   cpu.memory.write(cpu.registers.hl, newValue);
   cpu.registers.f = (
-    carry ? Flags.Carry : 0
+    (carry ? Flags.Carry : 0)
     | ((newValue & 0xff) === 0 ? Flags.Zero : 0)
   );
 };
@@ -158,7 +158,7 @@ const makeSetHL = (i: number) => (cpu: SM83) => {
   const newValue = ((carry << 7) | (value >> 1)) & 0xff;
   cpu.memory.write(cpu.registers.hl, newValue);
   cpu.registers.f = (
-    carry ? Flags.Carry : 0
+    (carry ? Flags.Carry : 0)
     | ((newValue & 0xff) === 0 ? Flags.Zero : 0)
   );
 };
@@ -173,7 +173,7 @@ const makeSetHL = (i: number) => (cpu: SM83) => {
   cpu.clock.tick(4 * 4);
   const value = cpu.memory.read(cpu.registers.hl);
   const carry = value >> 7;
-  const newValue = ((value << 1) | (cpu.registers.f >> Flags.CarryBit)) & 0xff;
+  const newValue = ((value << 1) | ((cpu.registers.f >> Flags.CarryBit) & 1)) & 0xff;
   cpu.memory.write(cpu.registers.hl, newValue);
   cpu.registers.f = (
     (carry ? Flags.Carry : 0)
@@ -231,7 +231,7 @@ const makeSetHL = (i: number) => (cpu: SM83) => {
   const newValue = (signMask | (value >> 1)) & 0xff;
   cpu.memory.write(cpu.registers.hl, newValue);
   cpu.registers.f = (
-    carry ? Flags.Carry : 0
+    (carry ? Flags.Carry : 0)
     | ((newValue & 0xff) === 0 ? Flags.Zero : 0)
   );
 };
@@ -259,13 +259,13 @@ const makeSetHL = (i: number) => (cpu: SM83) => {
 /* 0x3C */ const SRL_H = makeSrl('h');
 /* 0x3D */ const SRL_L = makeSrl('l');
 /* 0x3E */ const SRL_mHL = (cpu: SM83) => {
-  cpu.clock.tick(2 * 4);
+  cpu.clock.tick(4 * 4);
   const value = cpu.memory.read(cpu.registers.hl);
   const carry = value & 0x01;
   const newValue = (value >> 1) & 0xff;
   cpu.memory.write(cpu.registers.hl, newValue);
   cpu.registers.f = (
-    carry ? Flags.Carry : 0
+    (carry ? Flags.Carry : 0)
     | ((newValue & 0xff) === 0 ? Flags.Zero : 0)
   );
 };
