@@ -1,9 +1,9 @@
-import { Color, ILCDScreen } from './pixel-canvas';
-import { asI8, toHexString } from './utils';
-import { Clock } from './clock';
+import { SpelBoy } from './spelboy';
+import { Color } from './pixel-canvas';
+import { asI8 } from './utils';
 import { IMemoryInterface } from './memory-interface';
 import { Register8 } from './memory-interface/register';
-import { InterruptType, SM83 } from './sharp-sm83';
+import { InterruptType } from './sharp-sm83';
 
 const colors: Color[] = [
   [0xff, 0xff, 0xff],
@@ -160,9 +160,7 @@ type FifoData = {
 
 
 export class PPU implements IMemoryInterface {
-  cpu: SM83;
-  clock: Clock;
-  screen: ILCDScreen;
+  spelboy: SpelBoy;
 
   DMAInProgress: boolean = false;
   private DMAIndex: number = 0;
@@ -231,10 +229,13 @@ export class PPU implements IMemoryInterface {
     pixelsToDiscard: null
   };
 
-  constructor(cpu: SM83, screen: ILCDScreen, clock: Clock) {
-    this.cpu = cpu;
-    this.screen = screen;
-    this.clock = clock;
+  private get cpu() { return this.spelboy.cpu; }
+  private get clock() { return this.spelboy.clock; }
+  private get memory() { return this.spelboy.memory; }
+  private get screen() { return this.spelboy.screen; }
+
+  constructor(spelboy: SpelBoy) {
+    this.spelboy = spelboy;
   }
 
   read(address: number) {
@@ -331,9 +332,8 @@ export class PPU implements IMemoryInterface {
       const bytesLeftToTransfer = 160 - this.DMAIndex;
       const cyclesToCopy = catchupCycles > bytesLeftToTransfer ? bytesLeftToTransfer : catchupCycles;
 
-      // TODO: This is kind of dirty - should probably just give the PPU an actual reference to memory
       for (let i = 0; i < cyclesToCopy; i++) {
-        this.OAM[this.DMAIndex] = this.cpu.memory.read(this.DMASourceAddress + this.DMAIndex, true);
+        this.OAM[this.DMAIndex] = this.memory.read(this.DMASourceAddress + this.DMAIndex, true);
         this.DMAIndex++;
       }
 

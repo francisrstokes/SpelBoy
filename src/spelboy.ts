@@ -35,19 +35,16 @@ const keyMap: Record<string, GameBoyButton> = {
 
 export class SpelBoy {
   clock: Clock = new Clock();
-  memory: MemoryInterface = new MemoryInterface();
+  memory: MemoryInterface = new MemoryInterface(this);
+  timer: Timer = new Timer(this);
   input: Input = new Input();
-  timer: Timer = new Timer(this.clock);
-  cpu: SM83 = new SM83(this.memory, this.input, this.timer, this.clock);
+  cpu: SM83 = new SM83(this);
+  ppu: PPU = new PPU(this);
   screen: PixelCanvas = new PixelCanvas(document.getElementById('main') as HTMLCanvasElement);
-  ppu: PPU = new PPU(this.cpu, this.screen, this.clock);
 
   private _loop = () => {};
 
   constructor() {
-    this.memory.connect(this.cpu, this.ppu, this.input, this.timer);
-    this.timer.connect(this.cpu);
-
     document.addEventListener('keydown', e => {
       if (e.key in keyMap) {
         this.input.press(keyMap[e.key]);

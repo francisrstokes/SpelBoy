@@ -1,10 +1,9 @@
+import { SpelBoy } from './../spelboy';
 import { InputAddress } from './../input';
-import { PPU, PPUMode, PPURegister, VRAMAddress, OAMAddress } from '../ppu';
-import { Register8 } from './register';
+import { PPUMode, PPURegister, VRAMAddress, OAMAddress } from '../ppu';
 import { bootRom } from '../bootrom';
-import { Timer, TimerAddress } from '../timer';
-import { InterruptAddress, SM83 } from '../sharp-sm83';
-import { Input } from '../input';
+import { TimerAddress } from '../timer';
+import { InterruptAddress } from '../sharp-sm83';
 
 export enum GameBoyAddress {
   ROMBank0 = 0x0000,
@@ -30,10 +29,7 @@ export interface IMemoryInterface {
 };
 
 export class MemoryInterface implements IMemoryInterface {
-  private ppu?: PPU;
-  private timer?: Timer;
-  private cpu?: SM83;
-  private input?: Input;
+  spelboy: SpelBoy;
   private memory = new Uint8Array(0xffff);
 
   /*private*/ bootRomMapped: boolean = true;
@@ -42,6 +38,15 @@ export class MemoryInterface implements IMemoryInterface {
   private romBank1: Uint8Array = new Uint8Array(0x4000);
   private ram: Uint8Array = new Uint8Array(0x2000);
   private hram: Uint8Array = new Uint8Array(0x7F);
+
+  private get ppu() { return this.spelboy.ppu; }
+  private get timer() { return this.spelboy.timer; }
+  private get cpu() { return this.spelboy.cpu; }
+  private get input() { return this.spelboy.input; }
+
+  constructor(spelboy: SpelBoy) {
+    this.spelboy = spelboy;
+  }
 
   loadROMBank0(data: Uint8Array) {
     if (data.byteLength > 0x4000) {
@@ -87,57 +92,35 @@ export class MemoryInterface implements IMemoryInterface {
     }
 
     if (address >= PPURegister.Start && address <= PPURegister.End) {
-      if (this.ppu) {
-        return this.ppu.read(address);
-      }
-      throw new Error('No PPU attached to memory interface.');
+      return this.ppu.read(address);
     }
 
     if (address >= OAMAddress.Start && address <= OAMAddress.End) {
-      if (this.ppu) {
-        const mode = this.ppu.getMode();
-
-        if (mode === PPUMode.HBlank || mode === PPUMode.VBlank) {
-          return this.ppu.read(address);
-        }
-
-        return 0xff;
+      const mode = this.ppu.getMode();
+      if (mode === PPUMode.HBlank || mode === PPUMode.VBlank) {
+        return this.ppu.read(address);
       }
-      throw new Error('No PPU attached to memory interface.');
+      return 0xff;
     }
 
     if (address >= VRAMAddress.Start && address <= VRAMAddress.End) {
-      if (this.ppu) {
-        const mode = this.ppu.getMode();
-
-        if (mode === PPUMode.HBlank || mode === PPUMode.VBlank || mode === PPUMode.OAMSearch) {
-          return this.ppu.read(address);
-        }
-
-        return 0xff;
+      const mode = this.ppu.getMode();
+      if (mode === PPUMode.HBlank || mode === PPUMode.VBlank || mode === PPUMode.OAMSearch) {
+        return this.ppu.read(address);
       }
-      throw new Error('No PPU attached to memory interface.');
+      return 0xff;
     }
 
     if (address >= TimerAddress.Start && address <= TimerAddress.End) {
-      if (this.timer) {
-        return this.timer.read(address);
-      }
-      throw new Error('No timer attached to memory interface.');
+      return this.timer.read(address);
     }
 
     if (address === InterruptAddress.IE || address === InterruptAddress.IF) {
-      if (this.cpu) {
-        return this.cpu.read(address);
-      }
-      throw new Error('No CPU attached to memory interface.');
+      return this.cpu.read(address);
     }
 
     if (address === InputAddress.P1) {
-      if (this.input) {
-        return this.input.read(address);
-      }
-      throw new Error('No Input attached to memory interface.');
+      return this.input.read(address);
     }
 
     switch (address) {
@@ -149,7 +132,7 @@ export class MemoryInterface implements IMemoryInterface {
 
   write(address: number, value: number) {
     // During DMA, the CPU can only access HRAM
-    if (this.ppu && this.ppu.DMAInProgress) {
+    if (this.ppu.DMAInProgress) {
       if (address >= GameBoyAddress.HRAMStart && address <= GameBoyAddress.HRAMEnd) {
         this.hram[address - GameBoyAddress.HRAMStart] = value;
       }
@@ -180,50 +163,31 @@ export class MemoryInterface implements IMemoryInterface {
     }
 
     if (address >= OAMAddress.Start && address <= OAMAddress.End) {
-      if (this.ppu) {
-        const mode = this.ppu.getMode();
-
-        if (mode === PPUMode.HBlank || mode === PPUMode.VBlank) {
-          return this.ppu.write(address, value);
-        }
-
-        return 0xff;
+      const mode = this.ppu.getMode();
+      if (mode === PPUMode.HBlank || mode === PPUMode.VBlank) {
+        return this.ppu.write(address, value);
       }
-      throw new Error('No PPU attached to memory interface.');
+      return 0xff;
     }
 
     if (address >= VRAMAddress.Start && address <= VRAMAddress.End) {
-      if (this.ppu) {
-        const mode = this.ppu.getMode();
-
-        if (mode === PPUMode.HBlank || mode === PPUMode.VBlank || mode === PPUMode.OAMSearch) {
-          return this.ppu.write(address, value);
-        }
-
-        return 0xff;
+      const mode = this.ppu.getMode();
+      if (mode === PPUMode.HBlank || mode === PPUMode.VBlank || mode === PPUMode.OAMSearch) {
+        return this.ppu.write(address, value);
       }
-      throw new Error('No PPU attached to memory interface.');
+      return 0xff;
     }
 
     if (address >= TimerAddress.Start && address <= TimerAddress.End) {
-      if (this.timer) {
-        return this.timer.write(address, value);
-      }
-      throw new Error('No timer attached to memory interface.');
+      return this.timer.write(address, value);
     }
 
     if (address === InterruptAddress.IE || address === InterruptAddress.IF) {
-      if (this.cpu) {
-        return this.cpu.write(address, value);
-      }
-      throw new Error('No CPU attached to memory interface.');
+      return this.cpu.write(address, value);
     }
 
     if (address === InputAddress.P1) {
-      if (this.input) {
-        return this.input.write(address, value);
-      }
-      throw new Error('No Input attached to memory interface.');
+      return this.input.write(address, value);
     }
 
     switch (address) {
@@ -235,14 +199,5 @@ export class MemoryInterface implements IMemoryInterface {
     }
 
     this.memory[address] = value;
-  }
-
-  private initiateDMA() {}
-
-  connect(cpu: SM83, ppu: PPU, input: Input, timer: Timer) {
-    this.cpu = cpu;
-    this.ppu = ppu;
-    this.input = input;
-    this.timer = timer;
   }
 };
