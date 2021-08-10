@@ -17,6 +17,7 @@ import { toBinString, toHexString } from './utils';
 import { Timer } from './timer';
 
 import { GameBoyButton, Input } from './input';
+import { parseCart, ParsedHeader } from './cart-parser';
 
 const CYCLES_PER_ANIMATION_FRAME = 70224;
 const MAX_SPEED_MULTIPLIER = 15;
@@ -42,6 +43,9 @@ export class SpelBoy {
   ppu: PPU = new PPU(this);
   screen: PixelCanvas = new PixelCanvas(document.getElementById('main') as HTMLCanvasElement);
 
+  cart: Uint8Array  = new Uint8Array();
+  header: ParsedHeader;
+
   private _loop = () => {};
 
   constructor() {
@@ -56,6 +60,12 @@ export class SpelBoy {
         this.input.release(keyMap[e.key]);
       }
     });
+  }
+
+  load(cart: Uint8Array) {
+    this.header = parseCart(cart);
+    this.cart = cart;
+    this.memory.initialise(this.header, this.cart);
   }
 
   loop = () => {
@@ -81,8 +91,7 @@ export class SpelBoy {
 const sb = new SpelBoy();
 
 const romData = new Uint8Array(romDataRaw);
-sb.memory.loadROMBank0(romData.slice(0, 0x4000));
-sb.memory.loadROMBank1(romData.slice(0x4000, 0x8000));
+sb.load(romData);
 
 sb.run();
 
