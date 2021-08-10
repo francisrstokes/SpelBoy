@@ -126,6 +126,7 @@ export class SM83 implements IMemoryInterface {
     }
 
     if (this.IME && enabledInterruptRequested) {
+      this.isHalted = false;
       this.handleInterrupt();
     } else {
       this.IME = this.delayedIME;
