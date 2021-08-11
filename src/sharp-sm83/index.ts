@@ -2,10 +2,8 @@ import { Registers, IRegisters } from './registers';
 import { IMemoryInterface, MemoryInterface } from '../memory-interface';
 import { ops } from './ops';
 import { toHexString } from '../utils';
-import { Clock } from '../clock';
 import { Register8 } from '../memory-interface/register';
-import { Input } from '../input';
-import { Timer } from '../timer';
+import { SpelBoy } from '../spelboy';
 
 export enum Flags {
   Zero          = (1 << 7),
@@ -41,12 +39,9 @@ const interruptTable = [
 ];
 
 export class SM83 implements IMemoryInterface {
-  registers: IRegisters = new Registers();
-  memory: MemoryInterface;
-  input: Input;
-  timer: Timer;
-  clock: Clock;
+  spelboy: SpelBoy;
 
+  registers: IRegisters = new Registers();
   isHalted = false;
   isStopped = false;
 
@@ -61,11 +56,13 @@ export class SM83 implements IMemoryInterface {
   // `inc a` (0x3C), then the increment is performed twice
   haltBugEffects: boolean = false;
 
-  constructor(memory: MemoryInterface, input: Input, timer: Timer, clock: Clock) {
-    this.memory = memory;
-    this.input = input;
-    this.timer = timer;
-    this.clock = clock;
+  get clock() { return this.spelboy.clock; }
+  get memory() { return this.spelboy.memory; }
+  get timer() { return this.spelboy.timer; }
+  get input() { return this.spelboy.input; }
+
+  constructor(spelboy: SpelBoy) {
+    this.spelboy = spelboy;
   }
 
   requestInterrupt(value: InterruptType) {
@@ -126,6 +123,7 @@ export class SM83 implements IMemoryInterface {
     }
 
     if (this.IME && enabledInterruptRequested) {
+      this.isHalted = false;
       this.handleInterrupt();
     } else {
       this.IME = this.delayedIME;

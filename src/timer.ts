@@ -1,4 +1,4 @@
-import { Clock } from './clock';
+import { SpelBoy } from './spelboy';
 import { IMemoryInterface } from './memory-interface';
 import { Register16, Register8 } from './memory-interface/register';
 import { InterruptType, SM83 } from './sharp-sm83';
@@ -17,8 +17,7 @@ export enum TimerAddress {
 const dividerLookup = [9, 3, 5, 7];
 
 export class Timer implements IMemoryInterface {
-  private clock: Clock;
-  private cpu: SM83;
+  private spelboy: SpelBoy;
   private lastUpdatedAtCycle = 0;
 
   private DIV = new Register16(0x0000);
@@ -30,12 +29,11 @@ export class Timer implements IMemoryInterface {
   private shouldLoadTIMA = false;
   private TIMALoadCountdown = 0;
 
-  constructor(clock: Clock) {
-    this.clock = clock;
-  }
+  private get clock() { return this.spelboy.clock; }
+  private get cpu() { return this.spelboy.cpu; }
 
-  connect(cpu: SM83) {
-    this.cpu = cpu;
+  constructor(spelboy: SpelBoy) {
+    this.spelboy = spelboy;
   }
 
   resetDIV() {
