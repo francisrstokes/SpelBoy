@@ -97,7 +97,7 @@ export enum PPUMode {
   Drawing = 3,
 }
 
-export enum FIFOFetcherState {
+export enum FetcherState {
   GetTile,
   GetTileDataLow,
   GetTileDataHigh,
@@ -115,21 +115,21 @@ type OAMSearchResult = {
 };
 
 type SpriteFetcher = {
-  state: FIFOFetcherState;
+  state: FetcherState;
   oamResult: OAMSearchResult;
   lowByte: number;
   highByte: number;
   buffer: Array<SpriteData>;
+  active: boolean;
 }
 
-type Fetcher = {
+type BGFetcher = {
+  state: FetcherState;
   x: number;
   tileIndex: number;
   lowByte: number;
   highByte: number;
-  buffer: Array<{
-    paletteIndex: number;
-  }>;
+  buffer: Array<number>;
   pixel: number;
   windowLineCounter: number;
   doubleBug: boolean;
@@ -141,23 +141,21 @@ type SpriteData = {
   useOBP1: boolean;
 };
 
-type FifoData = {
-  fetcher: Fetcher;
-  spriteFetcher: SpriteFetcher;
+type PixelPushData = {
+  bgFetcher: BGFetcher;
+  bgShiftRegister: Array<number>;
 
-  spriteFetch: boolean;
-  windowHasBegun: boolean;
-  windowLineActive: boolean;
+  spriteFetcher: SpriteFetcher;
+  spriteShiftRegister: Array<SpriteData>;
+
+  windowHasBegunThisFrame: boolean;
+  windowIsActiveThisScanline: boolean;
+
   scanlineX: number;
   currentPixel: number;
-  state: FIFOFetcherState;
-  bgShiftRegister: Array<number>;
-  spriteShiftRegister: Array<SpriteData>;
-  isDrawingWindow: boolean;
   hasDiscardedPixels: boolean;
   pixelsToDiscard: number;
 };
-
 
 export class PPU implements IMemoryInterface {
   spelboy: SpelBoy;
@@ -195,39 +193,7 @@ export class PPU implements IMemoryInterface {
   private VRAM: Uint8Array = new Uint8Array(0x2000);
   private OAM: Uint8Array = new Uint8Array(0xA0);
 
-  private fifoData: FifoData = {
-    fetcher: {
-      doubleBug: false,
-      x: 0,
-      buffer: [],
-      highByte: 0,
-      lowByte: 0,
-      tileIndex: 0,
-      pixel: 0,
-      windowLineCounter: 0
-    },
-
-    spriteFetcher: {
-      state: FIFOFetcherState.GetTile,
-      buffer: [],
-      highByte: 0,
-      lowByte: 0,
-      oamResult: null
-    },
-
-    windowHasBegun: false,
-    windowLineActive: false,
-
-    spriteFetch: false,
-    scanlineX: 0,
-    currentPixel: 0,
-    state: FIFOFetcherState.GetTile,
-    bgShiftRegister: [],
-    spriteShiftRegister: [],
-    isDrawingWindow: false,
-    hasDiscardedPixels: false,
-    pixelsToDiscard: null
-  };
+  private pixelData: PixelPushData;
 
   private get cpu() { return this.spelboy.cpu; }
   private get clock() { return this.spelboy.clock; }
@@ -236,6 +202,7 @@ export class PPU implements IMemoryInterface {
 
   constructor(spelboy: SpelBoy) {
     this.spelboy = spelboy;
+    this.resetFifoData();
   }
 
   read(address: number) {
@@ -280,13 +247,15 @@ export class PPU implements IMemoryInterface {
       case PPURegister.LCDC: {
         const enabled = (value & 0x80) === 0x80;
 
+        // Going from on to off
         if (this.isEnabled && !enabled) {
           this.STAT.value &= 0xfc; // Set mode flag to 00b
           this.LY.value = 0;
+          this.resetFifoData();
+        // Going from off to on
         } else if (!this.isEnabled && enabled) {
-          this.STAT.value = (this.STAT.value & 0xfe) | 0b10; // Set mode flag to 10b
+          this.STAT.value = (this.STAT.value & 0xfe) | PPUMode.OAMSearch;
           this.lastUpdatedAtCycle = this.clock.cycles;
-          // console.log(`STAT=${toBinString(this.STAT.value)}`)
         }
 
         this.isEnabled = enabled;
@@ -323,6 +292,38 @@ export class PPU implements IMemoryInterface {
 
   getMode() {
     return (this.STAT.value & 0b11) as PPUMode;
+  }
+
+  private resetFifoData() {
+    this.pixelData = {
+      bgFetcher: {
+        doubleBug: false,
+        pixel: 0,
+        x: 0,
+        windowLineCounter: 0,
+        buffer: [],
+        highByte: 0,
+        lowByte: 0,
+        state: FetcherState.GetTile,
+        tileIndex: 0
+      },
+      spriteFetcher: {
+        state: FetcherState.GetTile,
+        buffer: [],
+        active: false,
+        highByte: 0,
+        lowByte: 0,
+        oamResult: null
+      },
+      bgShiftRegister: [],
+      spriteShiftRegister: [],
+      currentPixel: 0,
+      hasDiscardedPixels: false,
+      scanlineX: 0,
+      windowHasBegunThisFrame: false,
+      windowIsActiveThisScanline: false,
+      pixelsToDiscard: 0
+    }
   }
 
   update() {
@@ -397,10 +398,10 @@ export class PPU implements IMemoryInterface {
             this.STAT.value |= PPUMode.Drawing;
 
             // Reset the currentPixel value in the fifo state
-            this.fifoData.currentPixel = 0;
-            this.fifoData.fetcher.pixel = 0;
-            this.fifoData.fetcher.windowLineCounter = 0;
-            this.fifoData.spriteFetcher.buffer = [];
+            this.pixelData.currentPixel = 0;
+            this.pixelData.bgFetcher.pixel = 0;
+            this.pixelData.bgFetcher.windowLineCounter = 0;
+            this.pixelData.spriteFetcher.buffer = [];
 
             // console.log(`Spent ${this.cyclesSpentInMode} cycles in OAMSearch`);
             this.cyclesSpentInMode = 0;
@@ -431,8 +432,8 @@ export class PPU implements IMemoryInterface {
 
           // If we're at the end of the line, we need to go to HBlank
           const isEndOfLine = (
-            this.fifoData.currentPixel > 0
-            && this.fifoData.currentPixel % PIXELS_PER_ROW === 0
+            this.pixelData.currentPixel > 0
+            && this.pixelData.currentPixel % PIXELS_PER_ROW === 0
             && this.cyclesSpentInMode > 0
           );
 
@@ -443,14 +444,20 @@ export class PPU implements IMemoryInterface {
             this.STAT.value = (this.STAT.value & 0xfc) | PPUMode.HBlank;
 
             // Clear out any remaining data in the fifos
-            this.fifoData.bgShiftRegister = [];
-            this.fifoData.spriteShiftRegister = [];
-            this.fifoData.spriteFetch = false;
-            this.fifoData.fetcher.buffer = [];
-            this.fifoData.fetcher.x = 0;
-            this.fifoData.fetcher.doubleBug = false;
-            this.fifoData.windowLineActive = false;
-            this.fifoData.state = FIFOFetcherState.GetTile;
+            this.pixelData.spriteFetcher.active = false;
+            this.pixelData.spriteFetcher.buffer = [];
+            this.pixelData.spriteFetcher.state = FetcherState.GetTile;
+            this.pixelData.spriteShiftRegister = [];
+
+            this.pixelData.bgFetcher.buffer = [];
+            this.pixelData.bgFetcher.x = 0;
+            this.pixelData.bgFetcher.doubleBug = false;
+            this.pixelData.bgFetcher.state = FetcherState.GetTile;
+            this.pixelData.bgShiftRegister = [];
+
+            this.pixelData.windowIsActiveThisScanline = false;
+            this.pixelData.hasDiscardedPixels = false;
+            this.pixelData.scanlineX = 0;
           }
 
           if (catchupCycles <= 0) {
@@ -484,7 +491,7 @@ export class PPU implements IMemoryInterface {
 
           // When we start drawing again on the next line, we'll need to discard initial pixels
           // according to SCX (mod 8)
-          this.fifoData.hasDiscardedPixels = false;
+          this.pixelData.hasDiscardedPixels = false;
 
           if (this.LY.value === 144) {
             this.STAT.value = (this.STAT.value & 0xfc) | PPUMode.VBlank;
@@ -547,69 +554,69 @@ export class PPU implements IMemoryInterface {
   }
 
   private bgFetch() {
-    const {fetcher} = this.fifoData;
+    const {bgFetcher} = this.pixelData;
     // Each step here takes two cycles - and runs in tandem with pixel pushes
     // The coordination is done by the pixelPipe method, and so fetching does not
     // run in a loop, but is executed externally one step at a time
 
     // TODO: Implement window
-    switch (this.fifoData.state) {
-      case FIFOFetcherState.GetTile: {
+    switch (this.pixelData.bgFetcher.state) {
+      case FetcherState.GetTile: {
         let tileMapAddress: number;
 
-        if (this.fifoData.isDrawingWindow) {
+        if (this.pixelData.windowIsActiveThisScanline) {
           const windowTileMapBase = this.LCDC.bit(LCDCBit.WindowTileMapArea) === 0
             ? VRAMAddress.TileMap0
             : VRAMAddress.TileMap1;
 
-          const yOffset = TILES_PER_MAP_ROW * (fetcher.windowLineCounter >> 3);
-          tileMapAddress = windowTileMapBase + fetcher.x + yOffset;
+          const yOffset = TILES_PER_MAP_ROW * (bgFetcher.windowLineCounter >> 3);
+          tileMapAddress = windowTileMapBase + bgFetcher.x + yOffset;
 
-          fetcher.windowLineCounter++;
+          bgFetcher.windowLineCounter++;
         } else {
           const bgTileMapBase = this.LCDC.bit(LCDCBit.BGTileMapArea) === 0
             ? VRAMAddress.TileMap0
             : VRAMAddress.TileMap1;
 
-          const xOffset = (((fetcher.pixel + this.SCX.value) & 0xff) >> 3);
+          const xOffset = (((bgFetcher.pixel + this.SCX.value) & 0xff) >> 3);
           const yOffset = TILES_PER_MAP_ROW * (((this.LY.value + this.SCY.value) & 0xff) >> 3);
           tileMapAddress = bgTileMapBase + xOffset + yOffset;
         }
 
-        fetcher.tileIndex = this.VRAM[tileMapAddress - VRAMAddress.Start];
-        this.fifoData.state = FIFOFetcherState.GetTileDataLow;
+        bgFetcher.tileIndex = this.VRAM[tileMapAddress - VRAMAddress.Start];
+        this.pixelData.bgFetcher.state = FetcherState.GetTileDataLow;
         return;
       }
 
-      case FIFOFetcherState.GetTileDataLow: {
+      case FetcherState.GetTileDataLow: {
         const tileAreaBase = this.LCDC.bit(LCDCBit.BGAndWindowTileDataArea) === 0
           ? VRAMAddress.TileBlock3
           : VRAMAddress.TileBlock1;
 
         const offset = this.LCDC.bit(LCDCBit.BGAndWindowTileDataArea) === 0
-          ? asI8(fetcher.tileIndex)
-          : fetcher.tileIndex;
+          ? asI8(bgFetcher.tileIndex)
+          : bgFetcher.tileIndex;
 
         let addr: number;
 
-        if (this.fifoData.isDrawingWindow) {
-          const rowOffset = fetcher.windowLineCounter % PIXELS_PER_TILE;
+        if (this.pixelData.windowIsActiveThisScanline) {
+          const rowOffset = bgFetcher.windowLineCounter % PIXELS_PER_TILE;
           addr = tileAreaBase + (offset * BYTES_PER_TILE) + (rowOffset * 2);
         } else {
           const rowOffset = (this.LY.value + this.SCY.value) % PIXELS_PER_TILE;
           addr = tileAreaBase + (offset * BYTES_PER_TILE) + (rowOffset * 2);
         }
 
-        fetcher.lowByte = this.VRAM[addr - VRAMAddress.Start];
-        this.fifoData.state = FIFOFetcherState.GetTileDataHigh;
+        bgFetcher.lowByte = this.VRAM[addr - VRAMAddress.Start];
+        this.pixelData.bgFetcher.state = FetcherState.GetTileDataHigh;
         return;
       }
 
-      case FIFOFetcherState.GetTileDataHigh: {
+      case FetcherState.GetTileDataHigh: {
         const isWindow = (
           this.LCDC.bit(LCDCBit.WindowEnable)
           && this.WY.value >= this.LY.value
-          && this.WX.value >= this.fifoData.currentPixel
+          && this.WX.value >= this.pixelData.currentPixel
         );
 
         const tileAreaBase = this.LCDC.bit(LCDCBit.BGAndWindowTileDataArea) === 0
@@ -617,13 +624,13 @@ export class PPU implements IMemoryInterface {
           : VRAMAddress.TileBlock1;
 
         const offset = this.LCDC.bit(LCDCBit.BGAndWindowTileDataArea) === 0
-          ? asI8(fetcher.tileIndex)
-          : fetcher.tileIndex;
+          ? asI8(bgFetcher.tileIndex)
+          : bgFetcher.tileIndex;
 
         let addr: number;
 
         if (isWindow) {
-          const rowOffset = fetcher.windowLineCounter % PIXELS_PER_TILE;
+          const rowOffset = bgFetcher.windowLineCounter % PIXELS_PER_TILE;
           addr = tileAreaBase + (offset * BYTES_PER_TILE) + (rowOffset * 2);
         } else {
           const rowOffset = (this.LY.value + this.SCY.value) % PIXELS_PER_TILE;
@@ -635,38 +642,36 @@ export class PPU implements IMemoryInterface {
         // and the previous one. This would basically amount to emulating really
         // weird and probably inadvisable game programming behaviour, but I suppose
         // it's not the emulator authors place to judge.
-        fetcher.highByte = this.VRAM[addr + 1 - VRAMAddress.Start];
+        bgFetcher.highByte = this.VRAM[addr + 1 - VRAMAddress.Start];
 
         // Fill the fetcher buffer with color information
         for (let i = 7; i >= 0; i--) {
-          const b0 = ((fetcher.lowByte >> i) & 1);
-          const b1 = ((fetcher.highByte >> i) & 1) << 1;
-          fetcher.buffer.push({
-            paletteIndex: b0 | b1
-          });
+          const b0 = ((bgFetcher.lowByte >> i) & 1);
+          const b1 = ((bgFetcher.highByte >> i) & 1) << 1;
+          bgFetcher.buffer.push(b0 | b1);
         }
 
         // There is a bug that forces a second refetch at the beginning of each scanline, causing it to take
         // an extra 6 cycles before pushing pixels out of the fifo. This is what leads to a 172 cycle minimum
         // for mode 3.
-        if (!fetcher.doubleBug) {
-          fetcher.doubleBug = true;
-          fetcher.buffer = [];
-          this.fifoData.state = FIFOFetcherState.GetTile;
+        if (!bgFetcher.doubleBug) {
+          bgFetcher.doubleBug = true;
+          bgFetcher.buffer = [];
+          this.pixelData.bgFetcher.state = FetcherState.GetTile;
         } else {
-          this.fifoData.state = FIFOFetcherState.Push;
+          this.pixelData.bgFetcher.state = FetcherState.Push;
         }
 
         return;
       }
 
-      case FIFOFetcherState.Push: {
-        if (this.fifoData.bgShiftRegister.length === 0) {
-          this.fifoData.bgShiftRegister.push(...fetcher.buffer.map(x => x.paletteIndex));
-          fetcher.pixel += 8;
-          fetcher.x++;
-          fetcher.buffer = [];
-          this.fifoData.state = FIFOFetcherState.GetTile;
+      case FetcherState.Push: {
+        if (this.pixelData.bgShiftRegister.length === 0) {
+          this.pixelData.bgShiftRegister.push(...bgFetcher.buffer);
+          bgFetcher.pixel += 8;
+          bgFetcher.x++;
+          bgFetcher.buffer = [];
+          this.pixelData.bgFetcher.state = FetcherState.GetTile;
         }
         return;
       }
@@ -674,26 +679,26 @@ export class PPU implements IMemoryInterface {
   }
 
   private spriteFetch() {
-    const {spriteFetcher} = this.fifoData;
+    const {spriteFetcher} = this.pixelData;
 
     switch (spriteFetcher.state) {
-      case FIFOFetcherState.GetTile: {
+      case FetcherState.GetTile: {
         // This is a no-op, since we already have this data stored from our OAM search
-        spriteFetcher.state = FIFOFetcherState.GetTileDataLow;
+        spriteFetcher.state = FetcherState.GetTileDataLow;
         return;
       }
 
-      case FIFOFetcherState.GetTileDataLow: {
+      case FetcherState.GetTileDataLow: {
         const tileAreaBase = VRAMAddress.TileBlock1;
         const offset = spriteFetcher.oamResult.tileIndex * BYTES_PER_TILE;
         const addr = tileAreaBase + offset + spriteFetcher.oamResult.lineOffsetLow;
 
         spriteFetcher.lowByte = this.VRAM[addr - VRAMAddress.Start];
-        spriteFetcher.state = FIFOFetcherState.GetTileDataHigh;
+        spriteFetcher.state = FetcherState.GetTileDataHigh;
         return;
       }
 
-      case FIFOFetcherState.GetTileDataHigh: {
+      case FetcherState.GetTileDataHigh: {
         const tileAreaBase = VRAMAddress.TileBlock1;
         const offset = spriteFetcher.oamResult.tileIndex * BYTES_PER_TILE;
 
@@ -719,16 +724,16 @@ export class PPU implements IMemoryInterface {
           spriteFetcher.buffer.reverse();
         }
 
-        spriteFetcher.state = FIFOFetcherState.Push;
+        spriteFetcher.state = FetcherState.Push;
         return;
       }
 
-      case FIFOFetcherState.Push: {
-        if (this.fifoData.spriteShiftRegister.length === 0) {
-          this.fifoData.spriteShiftRegister = [...spriteFetcher.buffer];
+      case FetcherState.Push: {
+        if (this.pixelData.spriteShiftRegister.length === 0) {
+          this.pixelData.spriteShiftRegister = [...spriteFetcher.buffer];
           spriteFetcher.buffer = [];
-          spriteFetcher.state = FIFOFetcherState.GetTile;
-          this.fifoData.spriteFetch = false;
+          spriteFetcher.state = FetcherState.GetTile;
+          this.pixelData.spriteFetcher.active = false;
         }
         return;
       }
@@ -737,41 +742,41 @@ export class PPU implements IMemoryInterface {
 
   private pixelPipe(catchupCycles: number) {
     while (catchupCycles >= 2) {
-      const {fetcher, spriteFetcher} = this.fifoData;
+      const {bgFetcher: fetcher, spriteFetcher} = this.pixelData;
 
-      if (this.fifoData.spriteFetch) {
+      if (this.pixelData.spriteFetcher.active) {
         this.spriteFetch();
       } else {
         // Search for any sprite that should be rendered right now
-        const sprite = this.OAMSearchBuffer.find(s => this.fifoData.currentPixel + 8 === s.x);
+        const sprite = this.OAMSearchBuffer.find(s => this.pixelData.currentPixel + 8 === s.x);
         if (sprite) {
           spriteFetcher.oamResult = sprite;
-          this.fifoData.spriteFetch = true;
+          this.pixelData.spriteFetcher.active = true;
           this.spriteFetch();
         }
       }
 
-      if (!this.fifoData.spriteFetch) {
+      if (!this.pixelData.spriteFetcher.active) {
         this.bgFetch();
       }
 
       for (let i = 0; i < 2; i++) {
-        if (this.fifoData.bgShiftRegister.length > 0 && !this.fifoData.spriteFetch) {
+        if (this.pixelData.bgShiftRegister.length > 0 && !this.pixelData.spriteFetcher.active) {
 
           // TODO: This is still wrong - need to go one pixel at a time and decrement the
           // catchupCycles each time
-          if (!this.fifoData.hasDiscardedPixels) {
+          if (!this.pixelData.hasDiscardedPixels) {
             const scxMod8 = this.SCX.value % 8;
-            this.fifoData.bgShiftRegister.splice(0, scxMod8);
-            this.fifoData.hasDiscardedPixels = true;
+            this.pixelData.bgShiftRegister.splice(0, scxMod8);
+            this.pixelData.hasDiscardedPixels = true;
           }
 
-          const bgPaletteIndex = this.fifoData.bgShiftRegister.shift();
+          const bgPaletteIndex = this.pixelData.bgShiftRegister.shift();
           const bgColorIndex = (this.BGP.value >> (bgPaletteIndex * 2)) & 0b11;
           const bgColor = colors[bgColorIndex];
 
-          if (this.fifoData.spriteShiftRegister.length) {
-            const {colorIndex, useOBP1, bgAndWindowOverSprite} = this.fifoData.spriteShiftRegister.shift();
+          if (this.pixelData.spriteShiftRegister.length) {
+            const {colorIndex, useOBP1, bgAndWindowOverSprite} = this.pixelData.spriteShiftRegister.shift();
             const palette = useOBP1 ? this.OBP1.value : this.OBP0.value;
             const spColorIndex = (palette >> (colorIndex * 2)) & 0b11;
             const spColor = colors[spColorIndex];
@@ -786,26 +791,26 @@ export class PPU implements IMemoryInterface {
             this.screen.pushPixel(bgColor);
           }
 
-          this.fifoData.currentPixel++;
+          this.pixelData.currentPixel++;
           catchupCycles--;
 
-          const isWindow = this.fifoData.windowLineActive || (
+          const isWindow = this.pixelData.windowIsActiveThisScanline || (
             this.LCDC.bit(LCDCBit.WindowEnable)
-            && (this.fifoData.windowHasBegun || this.WY.value === this.LY.value)
-            && this.fifoData.currentPixel >= this.WX.value - 7
+            && (this.pixelData.windowHasBegunThisFrame || this.WY.value === this.LY.value)
+            && this.pixelData.currentPixel >= this.WX.value - 7
           );
 
           if (isWindow) {
             fetcher.x = 0;
-            this.fifoData.state = FIFOFetcherState.GetTile;
-            this.fifoData.bgShiftRegister = [];
-            this.fifoData.windowLineActive = true;
-            this.fifoData.windowHasBegun = true;
+            this.pixelData.bgFetcher.state = FetcherState.GetTile;
+            this.pixelData.bgShiftRegister = [];
+            this.pixelData.windowIsActiveThisScanline = true;
+            this.pixelData.windowHasBegunThisFrame = true;
             fetcher.buffer = [];
           }
 
           // If we reach the end of a line, jump out and allow a state change
-          if (this.fifoData.currentPixel % PIXELS_PER_ROW === 0) {
+          if (this.pixelData.currentPixel % PIXELS_PER_ROW === 0) {
             return catchupCycles;
           }
         } else {
