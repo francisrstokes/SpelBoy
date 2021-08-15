@@ -746,7 +746,7 @@ export class PPU implements IMemoryInterface {
 
       if (this.pixelData.spriteFetcher.active) {
         this.spriteFetch();
-      } else {
+      } else if (this.pixelData.spriteShiftRegister.length < 8) {
         // Search for any sprite that should be rendered right now
         const sprite = this.OAMSearchBuffer.find(s => this.pixelData.currentPixel + 8 === s.x);
         if (sprite) {
@@ -761,7 +761,8 @@ export class PPU implements IMemoryInterface {
       }
 
       for (let i = 0; i < 2; i++) {
-        if (this.pixelData.bgShiftRegister.length > 0 && !this.pixelData.spriteFetcher.active) {
+        // TODO: Confirm that this is the only condition for proceeding with the pixel pipe
+        if (this.pixelData.bgShiftRegister.length > 0) {
 
           // TODO: This is still wrong - need to go one pixel at a time and decrement the
           // catchupCycles each time
