@@ -7,21 +7,20 @@ export interface Register {
   setBit: (index: number) => void;
   didOverflow: () => boolean;
   clearOverflow: () => void;
+  onWrite: (cb: ((value: number) => void)) => void;
 }
 
-export class Register8 implements Register {
-  private _value: number;
-  private overflowed: boolean = false;
+abstract class BaseRegister {
+  _value: number;
+  _overflowed: boolean = false;
+  _onWriteCallback: (value: number) => void = null;
 
   constructor(initialValue: number = 0) {
     this._value = initialValue;
   }
 
-  get value() { return this._value; }
-  set value(v: number) {
-    this.overflowed = (v > 0xff || v < -128);
-    this._value = ((v < 0) ? negativeToU8(v) : v) & 0xff;
-  }
+  abstract get value();
+  abstract set value(v:  number);
 
   bit(index: number) {
     return (this._value >> index) & 1;
@@ -36,45 +35,32 @@ export class Register8 implements Register {
   }
 
   didOverflow() {
-    return this.overflowed;
+    return this._overflowed;
   }
 
   clearOverflow() {
-    this.overflowed = false;
+    this._overflowed = false;
+  }
+
+  onWrite(cb: (value: number) => void)  {
+    this._onWriteCallback = cb;
+  }
+}
+
+export class Register8 extends BaseRegister implements Register {
+  get value() { return this._value; }
+  set value(v: number) {
+    this._overflowed = (v > 0xff || v < -128);
+    this._value = ((v < 0) ? negativeToU8(v) : v) & 0xff;
+    if (this._onWriteCallback) this._onWriteCallback(this._value);
   }
 };
 
-export class Register16 implements Register {
-  private _value: number;
-  private overflowed: boolean = false;
-
-  constructor(initialValue: number = 0) {
-    this._value = initialValue;
-  }
-
+export class Register16 extends BaseRegister implements Register {
   get value() { return this._value; }
   set value(v: number) {
-    this.overflowed = (v > 0xffff || v < -32768);
+    this._overflowed = (v > 0xffff || v < -32768);
     this._value = ((v < 0) ? negativeToU16(v) : v) & 0xffff;
   }
 
-  bit(index: number) {
-    return (this._value >> index) & 1;
-  }
-
-  setBit(index: number) {
-    this._value |= (1 << index);
-  }
-
-  clearBit(index: number) {
-    this._value &= ~(1 << index);
-  }
-
-  didOverflow() {
-    return this.overflowed;
-  }
-
-  clearOverflow() {
-    this.overflowed = false;
-  }
 };
