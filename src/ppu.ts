@@ -43,6 +43,17 @@ export enum LCDCBit {
   LCDAndPPUEnable
 }
 
+export enum StatBit {
+  ModeBit0,
+  ModeBit1,
+  LYC_LY,
+  Mode0HBlankInterruptSource,
+  Mode1VBlankInterruptSource,
+  Mode2OAMInterruptSource,
+  LYC_LYInterruptSource,
+  Unused,
+}
+
 export enum PPURegister {
   Start = 0xFF40,
 
@@ -203,6 +214,23 @@ export class PPU implements IMemoryInterface {
   constructor(spelboy: SpelBoy) {
     this.spelboy = spelboy;
     this.resetFifoData();
+
+    // A register callback is used here because the LY register is not actually writable via the MMIO
+    // interface. Internally, there are several places we'd need to include this logic otherwise.
+    // A callback like this obscures the code a little, since it's side effects can't easily be seen in
+    // the actual codepath, but it seems to make sense for this specific context
+    this.LY.onWrite(ly => {
+      if (ly === this.LYC.value) {
+        this.STAT.setBit(StatBit.LYC_LY);
+
+        // Check if we're supposed to send out an interrupt on equality
+        if (this.STAT.bit(StatBit.LYC_LYInterruptSource)) {
+          this.cpu.requestInterrupt(InterruptType.LCDSTAT);
+        }
+      } else {
+        this.STAT.clearBit(StatBit.LYC_LY);
+      }
+    });
   }
 
   read(address: number) {
@@ -265,10 +293,7 @@ export class PPU implements IMemoryInterface {
       case PPURegister.STAT: { this.STAT.value = value; return; }
       case PPURegister.SCY: { this.SCY.value = value; return; }
       case PPURegister.SCX: { this.SCX.value = value; return; }
-      case PPURegister.LY: {
-        // TODO: Is this register actually R/W?
-        this.LY.value = value; return;
-      }
+      case PPURegister.LY: { return; }
       case PPURegister.LYC: { this.LYC.value = value; return; }
       case PPURegister.DMA: {
         this.DMA.value = value;
@@ -322,6 +347,7 @@ export class PPU implements IMemoryInterface {
       scanlineX: 0,
       windowHasBegunThisFrame: false,
       windowIsActiveThisScanline: false,
+
       pixelsToDiscard: 0
     }
   }
@@ -347,7 +373,6 @@ export class PPU implements IMemoryInterface {
     // Is the LCD enabled?
     if (!(this.LCDC.value & 0x80)) return;
 
-
     while (true) {
       switch (this.getMode()) {
         case PPUMode.OAMSearch: {
@@ -369,9 +394,6 @@ export class PPU implements IMemoryInterface {
             const ly16 = this.LY.value + 16;
 
             if (ox > 0 && ly16 >= oy && ly16 < oy + spriteHeight && this.OAMSearchBuffer.length < 10) {
-              if (oy === 112) {
-                debugger;
-              }
               this.OAMSearchBuffer.push({
                 address: objectAddress,
                 x: ox,
@@ -443,6 +465,11 @@ export class PPU implements IMemoryInterface {
 
             this.STAT.value = (this.STAT.value & 0xfc) | PPUMode.HBlank;
 
+            // Request the interrupt on the STAT line if the corresponding bit is set
+            if (this.STAT.bit(StatBit.Mode0HBlankInterruptSource)) {
+              this.cpu.requestInterrupt(InterruptType.LCDSTAT);
+            }
+
             // Clear out any remaining data in the fifos
             this.pixelData.spriteFetcher.active = false;
             this.pixelData.spriteFetcher.buffer = [];
@@ -497,9 +524,20 @@ export class PPU implements IMemoryInterface {
             this.STAT.value = (this.STAT.value & 0xfc) | PPUMode.VBlank;
 
             this.cpu.requestInterrupt(InterruptType.VBlank);
+
+            // Also request the interrupt on the STAT line if the corresponding bit is set
+            if (this.STAT.bit(StatBit.Mode1VBlankInterruptSource)) {
+              this.cpu.requestInterrupt(InterruptType.LCDSTAT);
+            }
+
             this.screen.draw();
           } else {
             this.STAT.value = (this.STAT.value & 0xfc) | PPUMode.OAMSearch;
+
+            // Request the interrupt on the STAT line if the corresponding bit is set
+            if (this.STAT.bit(StatBit.Mode2OAMInterruptSource)) {
+              this.cpu.requestInterrupt(InterruptType.LCDSTAT);
+            }
           }
 
           // console.log(`Spent ${this.cyclesSpentInMode} cycles in HBlank`);
