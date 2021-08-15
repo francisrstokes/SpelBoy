@@ -89,6 +89,10 @@ export class SM83 implements IMemoryInterface {
       if (this.IF.bit(i) && this.IE.bit(i)) {
         // We've found a usable interrupt, prevent more from occurring
         this.IME = false;
+
+        //  Ensure that it's not set again on the next frame
+        this.delayedIME = false;
+
         // this.delayedIME = false;
         this.IF.clearBit(i);
 
