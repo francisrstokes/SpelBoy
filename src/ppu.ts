@@ -821,7 +821,7 @@ export class PPU implements IMemoryInterface {
             const spColor = colors[spColorIndex];
 
             // If this pixel is "transparent", draw the background pixel
-            if (spColorIndex === 0 || (bgAndWindowOverSprite && bgColorIndex !== 0)) {
+            if (colorIndex === 0 || (bgAndWindowOverSprite && bgColorIndex !== 0)) {
               this.screen.pushPixel(bgColor);
             } else {
               this.screen.pushPixel(spColor);
