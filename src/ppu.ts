@@ -115,6 +115,17 @@ export enum FetcherState {
   Push,
 }
 
+export enum SpriteFlags {
+  Palette0              = 0x00,
+  Palette1              = 0x01,
+  Palette3              = 0x02,
+  TileVRAMBank          = 0x04,
+  UseOBP1               = 0x10,
+  FlipX                 = 0x20,
+  FlipY                 = 0x40,
+  BGAndWindowOverSprite = 0x80,
+}
+
 type OAMSearchResult = {
   address: number;
   x: number;
@@ -729,7 +740,12 @@ export class PPU implements IMemoryInterface {
       case FetcherState.GetTileDataLow: {
         const tileAreaBase = VRAMAddress.TileBlock1;
         const offset = spriteFetcher.oamResult.tileIndex * BYTES_PER_TILE;
-        const addr = tileAreaBase + offset + spriteFetcher.oamResult.lineOffsetLow;
+        const size = (this.LCDC.bit(LCDCBit.OBJSize) ? 8 : 16) - 1;
+        const lineOffset =  Boolean(spriteFetcher.oamResult.flags & SpriteFlags.FlipY)
+          ? (2 * size - spriteFetcher.oamResult.lineOffsetLow)
+          : spriteFetcher.oamResult.lineOffsetLow;
+
+        const addr = tileAreaBase + offset + lineOffset;
 
         spriteFetcher.lowByte = this.VRAM[addr - VRAMAddress.Start];
         spriteFetcher.state = FetcherState.GetTileDataHigh;
@@ -740,8 +756,12 @@ export class PPU implements IMemoryInterface {
         const tileAreaBase = VRAMAddress.TileBlock1;
         const offset = spriteFetcher.oamResult.tileIndex * BYTES_PER_TILE;
 
-        // TODO: Account for the flip-y bit
-        const addr = tileAreaBase + offset + spriteFetcher.oamResult.lineOffsetHigh;
+        const size = (this.LCDC.bit(LCDCBit.OBJSize) ? 16 : 8) - 1;
+        const lineOffset =  Boolean(spriteFetcher.oamResult.flags & SpriteFlags.FlipY)
+          ? (2 * size - spriteFetcher.oamResult.lineOffsetHigh)
+          : spriteFetcher.oamResult.lineOffsetHigh;
+
+          const addr = tileAreaBase + offset + lineOffset;
 
         spriteFetcher.lowByte = this.VRAM[addr - VRAMAddress.Start];
         spriteFetcher.highByte = this.VRAM[addr + 1 - VRAMAddress.Start];
@@ -752,13 +772,13 @@ export class PPU implements IMemoryInterface {
           const b1 = ((spriteFetcher.highByte >> i) & 1) << 1;
           spriteFetcher.buffer.push({
             colorIndex: b0 | b1,
-            bgAndWindowOverSprite: Boolean(spriteFetcher.oamResult.flags & 0x80),
-            useOBP1: Boolean(spriteFetcher.oamResult.flags & 0x10)
+            bgAndWindowOverSprite: Boolean(spriteFetcher.oamResult.flags & SpriteFlags.BGAndWindowOverSprite),
+            useOBP1: Boolean(spriteFetcher.oamResult.flags & SpriteFlags.UseOBP1)
           });
         }
 
         // Reverse the buffer if the Flip-X bit is set
-        if (spriteFetcher.oamResult.flags & 0x20) {
+        if (spriteFetcher.oamResult.flags & SpriteFlags.FlipX) {
           spriteFetcher.buffer.reverse();
         }
 
