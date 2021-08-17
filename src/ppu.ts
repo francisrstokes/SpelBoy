@@ -5,8 +5,9 @@ import { IMemoryInterface } from './memory-interface';
 import { Register8 } from './memory-interface/register';
 import { InterruptType } from './sharp-sm83';
 
+const WHITE: Color = [0xff, 0xff, 0xff];
 const colors: Color[] = [
-  [0xff, 0xff, 0xff],
+  WHITE,
   [0xaa, 0xaa, 0xaa],
   [0x55, 0x55, 0x55],
   [0x00, 0x00, 0x00],
@@ -840,14 +841,26 @@ export class PPU implements IMemoryInterface {
             const spColorIndex = (palette >> (colorIndex * 2)) & 0b11;
             const spColor = colors[spColorIndex];
 
+            const spritesEnabled = this.LCDC.bit(LCDCBit.OBJEnable);
+            const bgEnabled = this.LCDC.bit(LCDCBit.BGAndWindowEnablePriority);
+
             // If this pixel is "transparent", draw the background pixel
-            if (colorIndex === 0 || (bgAndWindowOverSprite && bgColorIndex !== 0)) {
-              this.screen.pushPixel(bgColor);
+            if (!spritesEnabled || colorIndex === 0 || (bgAndWindowOverSprite && bgColorIndex !== 0)) {
+              if (!bgEnabled) {
+                this.screen.pushPixel(WHITE);
+              } else {
+                this.screen.pushPixel(bgColor);
+              }
             } else {
               this.screen.pushPixel(spColor);
             }
           } else {
-            this.screen.pushPixel(bgColor);
+            const bgEnabled = this.LCDC.bit(LCDCBit.BGAndWindowEnablePriority);
+            if (!bgEnabled) {
+              this.screen.pushPixel(WHITE);
+            } else {
+              this.screen.pushPixel(bgColor);
+            }
           }
 
           this.pixelData.currentPixel++;
