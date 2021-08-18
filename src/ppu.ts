@@ -1,6 +1,6 @@
 import { SpelBoy } from './spelboy';
 import { Color } from './pixel-canvas';
-import { asI8 } from './utils';
+import { asI8, toHexString } from './utils';
 import { IMemoryInterface } from './memory-interface';
 import { Register8 } from './memory-interface/register';
 import { InterruptType } from './sharp-sm83';
@@ -68,8 +68,8 @@ export enum PPURegister {
   BGP = 0xFF47,
   OBP0 = 0xFF48,
   OBP1 = 0xFF49,
-  WX = 0xFF4A,
-  WY = 0xFF4B,
+  WY = 0xFF4A,
+  WX = 0xFF4B,
 
   End = 0xFF4B
 }
@@ -148,12 +148,11 @@ type SpriteFetcher = {
 
 type BGFetcher = {
   state: FetcherState;
-  x: number;
   tileIndex: number;
   lowByte: number;
   highByte: number;
   buffer: Array<number>;
-  pixel: number;
+  pixelX: number;
   windowLineCounter: number;
   doubleBug: boolean;
 };
@@ -174,8 +173,7 @@ type PixelPushData = {
   windowHasBegunThisFrame: boolean;
   windowIsActiveThisScanline: boolean;
 
-  scanlineX: number;
-  currentPixel: number;
+  currentPixelX: number;
   hasDiscardedPixels: boolean;
   pixelsToDiscard: number;
 };
@@ -324,6 +322,11 @@ export class PPU implements IMemoryInterface {
       case PPURegister.BGP: { this.BGP.value = value; return; }
       case PPURegister.OBP0: { this.OBP0.value = value; return; }
       case PPURegister.OBP1: { this.OBP1.value = value; return; }
+      case PPURegister.WX: { this.WX.value = value; return; }
+      case PPURegister.WY: { this.WY.value = value; return; }
+      default: {
+        throw new Error(`Write to unhandled address: ${toHexString(address)}=${value}`);
+      }
     }
   }
 
@@ -335,9 +338,8 @@ export class PPU implements IMemoryInterface {
     this.pixelData = {
       bgFetcher: {
         doubleBug: false,
-        pixel: 0,
-        x: 0,
-        windowLineCounter: 0,
+        pixelX: 0,
+        windowLineCounter: -1,
         buffer: [],
         highByte: 0,
         lowByte: 0,
@@ -354,9 +356,8 @@ export class PPU implements IMemoryInterface {
       },
       bgShiftRegister: [],
       spriteShiftRegister: [],
-      currentPixel: 0,
+      currentPixelX: 0,
       hasDiscardedPixels: false,
-      scanlineX: 0,
       windowHasBegunThisFrame: false,
       windowIsActiveThisScanline: false,
 
@@ -431,11 +432,22 @@ export class PPU implements IMemoryInterface {
             // Move to Drawing mode
             this.STAT.value |= PPUMode.Drawing;
 
-            // Reset the currentPixel value in the fifo state
-            this.pixelData.currentPixel = 0;
-            this.pixelData.bgFetcher.pixel = 0;
-            this.pixelData.bgFetcher.windowLineCounter = 0;
+            // Reset the line-based pixel data values
+            this.pixelData.bgShiftRegister = [];
+            this.pixelData.bgFetcher.pixelX = 0;
+            this.pixelData.bgFetcher.buffer = [];
+            this.pixelData.bgFetcher.doubleBug = false;
+            this.pixelData.bgFetcher.state = FetcherState.GetTile;
+
+            this.pixelData.currentPixelX = 0;
+            this.pixelData.windowIsActiveThisScanline = false;
+            this.pixelData.hasDiscardedPixels = false;
+            this.pixelData.pixelsToDiscard = 0;
+
+            this.pixelData.spriteShiftRegister = [];
+            this.pixelData.spriteFetcher.active = false;
             this.pixelData.spriteFetcher.buffer = [];
+            this.pixelData.spriteFetcher.state = FetcherState.GetTile;
 
             // console.log(`Spent ${this.cyclesSpentInMode} cycles in OAMSearch`);
             this.cyclesSpentInMode = 0;
@@ -466,8 +478,8 @@ export class PPU implements IMemoryInterface {
 
           // If we're at the end of the line, we need to go to HBlank
           const isEndOfLine = (
-            this.pixelData.currentPixel > 0
-            && this.pixelData.currentPixel % PIXELS_PER_ROW === 0
+            this.pixelData.currentPixelX > 0
+            && this.pixelData.currentPixelX % PIXELS_PER_ROW === 0
             && this.cyclesSpentInMode > 0
           );
 
@@ -481,22 +493,6 @@ export class PPU implements IMemoryInterface {
             if (this.STAT.bit(StatBit.Mode0HBlankInterruptSource)) {
               this.cpu.requestInterrupt(InterruptType.LCDSTAT);
             }
-
-            // Clear out any remaining data in the fifos
-            this.pixelData.spriteFetcher.active = false;
-            this.pixelData.spriteFetcher.buffer = [];
-            this.pixelData.spriteFetcher.state = FetcherState.GetTile;
-            this.pixelData.spriteShiftRegister = [];
-
-            this.pixelData.bgFetcher.buffer = [];
-            this.pixelData.bgFetcher.x = 0;
-            this.pixelData.bgFetcher.doubleBug = false;
-            this.pixelData.bgFetcher.state = FetcherState.GetTile;
-            this.pixelData.bgShiftRegister = [];
-
-            this.pixelData.windowIsActiveThisScanline = false;
-            this.pixelData.hasDiscardedPixels = false;
-            this.pixelData.scanlineX = 0;
           }
 
           if (catchupCycles <= 0) {
@@ -541,6 +537,10 @@ export class PPU implements IMemoryInterface {
             if (this.STAT.bit(StatBit.Mode1VBlankInterruptSource)) {
               this.cpu.requestInterrupt(InterruptType.LCDSTAT);
             }
+
+            // Reset the frame-specific pixel data values
+            this.pixelData.bgFetcher.windowLineCounter = -1;
+            this.pixelData.windowHasBegunThisFrame = false;
 
             this.screen.draw();
           } else {
@@ -620,15 +620,13 @@ export class PPU implements IMemoryInterface {
             : VRAMAddress.TileMap1;
 
           const yOffset = TILES_PER_MAP_ROW * (bgFetcher.windowLineCounter >> 3);
-          tileMapAddress = windowTileMapBase + bgFetcher.x + yOffset;
-
-          bgFetcher.windowLineCounter++;
+          tileMapAddress = windowTileMapBase + (bgFetcher.pixelX >> 3) + yOffset;
         } else {
           const bgTileMapBase = this.LCDC.bit(LCDCBit.BGTileMapArea) === 0
             ? VRAMAddress.TileMap0
             : VRAMAddress.TileMap1;
 
-          const xOffset = (((bgFetcher.pixel + this.SCX.value) & 0xff) >> 3);
+          const xOffset = (((bgFetcher.pixelX + this.SCX.value) & 0xff) >> 3);
           const yOffset = TILES_PER_MAP_ROW * (((this.LY.value + this.SCY.value) & 0xff) >> 3);
           tileMapAddress = bgTileMapBase + xOffset + yOffset;
         }
@@ -663,12 +661,6 @@ export class PPU implements IMemoryInterface {
       }
 
       case FetcherState.GetTileDataHigh: {
-        const isWindow = (
-          this.LCDC.bit(LCDCBit.WindowEnable)
-          && this.WY.value >= this.LY.value
-          && this.WX.value >= this.pixelData.currentPixel
-        );
-
         const tileAreaBase = this.LCDC.bit(LCDCBit.BGAndWindowTileDataArea) === 0
           ? VRAMAddress.TileBlock3
           : VRAMAddress.TileBlock1;
@@ -679,7 +671,7 @@ export class PPU implements IMemoryInterface {
 
         let addr: number;
 
-        if (isWindow) {
+        if (this.pixelData.windowIsActiveThisScanline) {
           const rowOffset = bgFetcher.windowLineCounter % PIXELS_PER_TILE;
           addr = tileAreaBase + (offset * BYTES_PER_TILE) + (rowOffset * 2);
         } else {
@@ -718,8 +710,7 @@ export class PPU implements IMemoryInterface {
       case FetcherState.Push: {
         if (this.pixelData.bgShiftRegister.length === 0) {
           this.pixelData.bgShiftRegister.push(...bgFetcher.buffer);
-          bgFetcher.pixel += 8;
-          bgFetcher.x++;
+          bgFetcher.pixelX += 8;
           bgFetcher.buffer = [];
           this.pixelData.bgFetcher.state = FetcherState.GetTile;
         }
@@ -801,13 +792,13 @@ export class PPU implements IMemoryInterface {
 
   private pixelPipe(catchupCycles: number) {
     while (catchupCycles >= 2) {
-      const {bgFetcher: fetcher, spriteFetcher} = this.pixelData;
+      const {bgFetcher, spriteFetcher} = this.pixelData;
 
       if (this.pixelData.spriteFetcher.active) {
         this.spriteFetch();
       } else if (this.pixelData.spriteShiftRegister.length < 8) {
         // Search for any sprite that should be rendered right now
-        const sprite = this.OAMSearchBuffer.find(s => this.pixelData.currentPixel + 8 === s.x);
+        const sprite = this.OAMSearchBuffer.find(s => this.pixelData.currentPixelX + 8 === s.x);
         if (sprite) {
           spriteFetcher.oamResult = sprite;
           this.pixelData.spriteFetcher.active = true;
@@ -863,26 +854,27 @@ export class PPU implements IMemoryInterface {
             }
           }
 
-          this.pixelData.currentPixel++;
+          this.pixelData.currentPixelX++;
           catchupCycles--;
 
           const isWindow = this.pixelData.windowIsActiveThisScanline || (
             this.LCDC.bit(LCDCBit.WindowEnable)
-            && (this.pixelData.windowHasBegunThisFrame || this.WY.value === this.LY.value)
-            && this.pixelData.currentPixel >= this.WX.value - 7
+            && (this.pixelData.windowHasBegunThisFrame || (this.WY.value === this.LY.value))
+            && (this.pixelData.currentPixelX >= this.WX.value - 7)
           );
 
-          if (isWindow) {
-            fetcher.x = 0;
-            this.pixelData.bgFetcher.state = FetcherState.GetTile;
+          if (isWindow && !this.pixelData.windowIsActiveThisScanline) {
             this.pixelData.bgShiftRegister = [];
+            bgFetcher.pixelX = 0;
+            bgFetcher.buffer = [];
+            bgFetcher.state = FetcherState.GetTile;
+            bgFetcher.windowLineCounter++;
             this.pixelData.windowIsActiveThisScanline = true;
             this.pixelData.windowHasBegunThisFrame = true;
-            fetcher.buffer = [];
           }
 
           // If we reach the end of a line, jump out and allow a state change
-          if (this.pixelData.currentPixel % PIXELS_PER_ROW === 0) {
+          if (this.pixelData.currentPixelX % PIXELS_PER_ROW === 0) {
             return catchupCycles;
           }
         } else {
