@@ -390,7 +390,7 @@ export class PPU implements IMemoryInterface {
       switch (this.getMode()) {
         case PPUMode.OAMSearch: {
           // console.log(`Running OAMSearch for LY=${this.LY.value} (${catchupCycles} cycles to catchup)`);
-          const spriteHeight = this.LCDC.value & 0x04 ? 16 : 8;
+          const spriteHeight = this.LCDC.bit(LCDCBit.OBJSize) ? 16 : 8;
 
           // Make sure the buffer is clear
           if (this.currentOAMIndex === 0) {
@@ -731,10 +731,15 @@ export class PPU implements IMemoryInterface {
 
       case FetcherState.GetTileDataLow: {
         const tileAreaBase = VRAMAddress.TileBlock1;
-        const offset = spriteFetcher.oamResult.tileIndex * BYTES_PER_TILE;
+
+        const processedIndex = this.LCDC.bit(LCDCBit.OBJSize)
+          ? spriteFetcher.oamResult.tileIndex & 0xfe
+          : spriteFetcher.oamResult.tileIndex;
+
+        const offset = processedIndex * BYTES_PER_TILE;
         const size = (this.LCDC.bit(LCDCBit.OBJSize) ? 8 : 16) - 1;
         const lineOffset =  Boolean(spriteFetcher.oamResult.flags & SpriteFlags.FlipY)
-          ? (2 * size - spriteFetcher.oamResult.lineOffsetLow)
+          ? (size - spriteFetcher.oamResult.lineOffsetLow)
           : spriteFetcher.oamResult.lineOffsetLow;
 
         const addr = tileAreaBase + offset + lineOffset;
@@ -746,14 +751,19 @@ export class PPU implements IMemoryInterface {
 
       case FetcherState.GetTileDataHigh: {
         const tileAreaBase = VRAMAddress.TileBlock1;
-        const offset = spriteFetcher.oamResult.tileIndex * BYTES_PER_TILE;
+
+        const processedIndex = this.LCDC.bit(LCDCBit.OBJSize)
+          ? spriteFetcher.oamResult.tileIndex & 0xfe
+          : spriteFetcher.oamResult.tileIndex;
+
+        const offset = processedIndex * BYTES_PER_TILE;
 
         const size = (this.LCDC.bit(LCDCBit.OBJSize) ? 16 : 8) - 1;
         const lineOffset =  Boolean(spriteFetcher.oamResult.flags & SpriteFlags.FlipY)
           ? (2 * size - spriteFetcher.oamResult.lineOffsetHigh)
           : spriteFetcher.oamResult.lineOffsetHigh;
 
-          const addr = tileAreaBase + offset + lineOffset;
+        const addr = tileAreaBase + offset + lineOffset;
 
         spriteFetcher.lowByte = this.VRAM[addr - VRAMAddress.Start];
         spriteFetcher.highByte = this.VRAM[addr + 1 - VRAMAddress.Start];
