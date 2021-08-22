@@ -161,6 +161,7 @@ type SpriteData = {
   colorIndex: number;
   bgAndWindowOverSprite: boolean;
   useOBP1: boolean;
+  finalColorIndex: number;
 };
 
 type PixelPushData = {
@@ -767,10 +768,17 @@ export class PPU implements IMemoryInterface {
         for (let i = 7; i >= 0; i--) {
           const b0 = ((spriteFetcher.lowByte >> i) & 1);
           const b1 = ((spriteFetcher.highByte >> i) & 1) << 1;
+
+          const colorIndex = b0 | b1;
+          const useOBP1 = Boolean(spriteFetcher.oamResult.flags & SpriteFlags.UseOBP1);
+          const palette = useOBP1 ? this.OBP1.value : this.OBP0.value;
+          const finalColorIndex = (palette >> (colorIndex * 2)) & 0b11;
+
           spriteFetcher.buffer.push({
-            colorIndex: b0 | b1,
+            colorIndex,
+            useOBP1,
+            finalColorIndex,
             bgAndWindowOverSprite: Boolean(spriteFetcher.oamResult.flags & SpriteFlags.BGAndWindowOverSprite),
-            useOBP1: Boolean(spriteFetcher.oamResult.flags & SpriteFlags.UseOBP1)
           });
         }
 
@@ -784,11 +792,18 @@ export class PPU implements IMemoryInterface {
       }
 
       case FetcherState.Push: {
-        if (this.pixelData.spriteShiftRegister.length > 0) {
-          spriteFetcher.buffer.splice(0, this.pixelData.spriteShiftRegister.length);
+        const shiftReg = this.pixelData.spriteShiftRegister;
+
+        for (let i = 0; i < spriteFetcher.buffer.length; i++) {
+          if (shiftReg[i]) {
+            if (shiftReg[i].finalColorIndex === 0 && spriteFetcher.buffer[i].finalColorIndex !== 0) {
+              shiftReg[i] = spriteFetcher.buffer[i];
+            }
+          } else {
+            shiftReg.push(spriteFetcher.buffer[i]);
+          }
         }
 
-        this.pixelData.spriteShiftRegister.push(...spriteFetcher.buffer);
         spriteFetcher.buffer = [];
         spriteFetcher.state = FetcherState.GetTile;
         spriteFetcher.active = false;
