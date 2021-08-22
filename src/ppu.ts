@@ -427,7 +427,6 @@ export class PPU implements IMemoryInterface {
 
           // Are we done with OAM search?
           if (this.currentOAMIndex === 40) {
-            this.sortOAMSearchBuffer();
             this.currentOAMIndex = 0;
             // Move to Drawing mode
             this.STAT.value |= PPUMode.Drawing;
@@ -597,10 +596,6 @@ export class PPU implements IMemoryInterface {
       }
     }
 
-  }
-
-  private sortOAMSearchBuffer() {
-    this.OAMSearchBuffer.sort((a, b) => a.x - b.x);
   }
 
   private bgFetch() {
@@ -789,12 +784,15 @@ export class PPU implements IMemoryInterface {
       }
 
       case FetcherState.Push: {
-        if (this.pixelData.spriteShiftRegister.length === 0) {
-          this.pixelData.spriteShiftRegister = [...spriteFetcher.buffer];
-          spriteFetcher.buffer = [];
-          spriteFetcher.state = FetcherState.GetTile;
-          this.pixelData.spriteFetcher.active = false;
+        if (this.pixelData.spriteShiftRegister.length > 0) {
+          spriteFetcher.buffer.splice(0, this.pixelData.spriteShiftRegister.length);
         }
+
+        this.pixelData.spriteShiftRegister.push(...spriteFetcher.buffer);
+        spriteFetcher.buffer = [];
+        spriteFetcher.state = FetcherState.GetTile;
+        spriteFetcher.active = false;
+        spriteFetcher.oamResult = null;
         return;
       }
     }
@@ -804,25 +802,30 @@ export class PPU implements IMemoryInterface {
     while (catchupCycles >= 2) {
       const {bgFetcher, spriteFetcher} = this.pixelData;
 
-      if (this.pixelData.spriteFetcher.active) {
+      if (spriteFetcher.active) {
         this.spriteFetch();
-      } else if (this.pixelData.spriteShiftRegister.length < 8) {
+      } else {
         // Search for any sprite that should be rendered right now
-        const sprite = this.OAMSearchBuffer.find(s => this.pixelData.currentPixelX + 8 === s.x);
+        const spriteIndex = this.OAMSearchBuffer.findIndex(s => s.x <= this.pixelData.currentPixelX + 8);
+        let sprite;
+        if (spriteIndex > -1) {
+          sprite = this.OAMSearchBuffer[spriteIndex];
+          this.OAMSearchBuffer.splice(spriteIndex,  1);
+        }
+
         if (sprite) {
           spriteFetcher.oamResult = sprite;
-          this.pixelData.spriteFetcher.active = true;
+          spriteFetcher.active = true;
           this.spriteFetch();
         }
       }
 
-      if (!this.pixelData.spriteFetcher.active) {
+      if (!spriteFetcher.active) {
         this.bgFetch();
       }
 
       for (let i = 0; i < 2; i++) {
-        // TODO: Confirm that this is the only condition for proceeding with the pixel pipe
-        if (this.pixelData.bgShiftRegister.length > 0) {
+        if (this.pixelData.bgShiftRegister.length > 0 && !spriteFetcher.active) {
 
           // TODO: This is still wrong - need to go one pixel at a time and decrement the
           // catchupCycles each time
