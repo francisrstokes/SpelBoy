@@ -135,6 +135,7 @@ type OAMSearchResult = {
   lineOffsetHigh: number;
   tileIndex: number;
   flags: number;
+  index: number;
 };
 
 type SpriteFetcher = {
@@ -144,9 +145,11 @@ type SpriteFetcher = {
   highByte: number;
   buffer: Array<SpriteData>;
   active: boolean;
+  cycle: 0 | 1;
 }
 
 type BGFetcher = {
+  cycle: 0 | 1;
   state: FetcherState;
   tileIndex: number;
   lowByte: number;
@@ -338,6 +341,7 @@ export class PPU implements IMemoryInterface {
   private resetFifoData() {
     this.pixelData = {
       bgFetcher: {
+        cycle: 0,
         doubleBug: false,
         pixelX: 0,
         windowLineCounter: -1,
@@ -348,6 +352,7 @@ export class PPU implements IMemoryInterface {
         tileIndex: 0
       },
       spriteFetcher: {
+        cycle: 0,
         state: FetcherState.GetTile,
         buffer: [],
         active: false,
@@ -415,7 +420,8 @@ export class PPU implements IMemoryInterface {
                 lineOffsetLow: ly16 - oy,
                 lineOffsetHigh: (ly16 - oy) * 2,
                 tileIndex: tileIndex,
-                flags
+                flags,
+                index: this.OAMSearchBuffer.length
               });
             }
 
@@ -428,6 +434,7 @@ export class PPU implements IMemoryInterface {
 
           // Are we done with OAM search?
           if (this.currentOAMIndex === 40) {
+            this.sortOAMBuffer();
             this.currentOAMIndex = 0;
             // Move to Drawing mode
             this.STAT.value |= PPUMode.Drawing;
@@ -599,6 +606,17 @@ export class PPU implements IMemoryInterface {
 
   }
 
+  private sortOAMBuffer() {
+    this.OAMSearchBuffer.sort((a, b) => (
+      // If the x positions of two sprites are the same
+      // use their original positions in the OAM search buffer
+      // to decide priority
+      a.x === b.x
+        ? a.index - b.index
+        : a.x - b.x
+    ));
+  }
+
   private bgFetch() {
     const {bgFetcher} = this.pixelData;
     // Each step here takes two cycles - and runs in tandem with pixel pushes
@@ -606,8 +624,13 @@ export class PPU implements IMemoryInterface {
     // run in a loop, but is executed externally one step at a time
 
     // TODO: Implement window
-    switch (this.pixelData.bgFetcher.state) {
+    switch (bgFetcher.state) {
       case FetcherState.GetTile: {
+        if (bgFetcher.cycle === 0) {
+          bgFetcher.cycle = 1;
+          return;
+        }
+
         let tileMapAddress: number;
 
         if (this.pixelData.windowIsActiveThisScanline) {
@@ -629,10 +652,16 @@ export class PPU implements IMemoryInterface {
 
         bgFetcher.tileIndex = this.VRAM[tileMapAddress - VRAMAddress.Start];
         this.pixelData.bgFetcher.state = FetcherState.GetTileDataLow;
+        bgFetcher.cycle = 0;
         return;
       }
 
       case FetcherState.GetTileDataLow: {
+        if (bgFetcher.cycle === 0) {
+          bgFetcher.cycle = 1;
+          return;
+        }
+
         const tileAreaBase = this.LCDC.bit(LCDCBit.BGAndWindowTileDataArea) === 0
           ? VRAMAddress.TileBlock3
           : VRAMAddress.TileBlock1;
@@ -653,10 +682,16 @@ export class PPU implements IMemoryInterface {
 
         bgFetcher.lowByte = this.VRAM[addr - VRAMAddress.Start];
         this.pixelData.bgFetcher.state = FetcherState.GetTileDataHigh;
+        bgFetcher.cycle = 0;
         return;
       }
 
       case FetcherState.GetTileDataHigh: {
+        if (bgFetcher.cycle === 0) {
+          bgFetcher.cycle = 1;
+          return;
+        }
+
         const tileAreaBase = this.LCDC.bit(LCDCBit.BGAndWindowTileDataArea) === 0
           ? VRAMAddress.TileBlock3
           : VRAMAddress.TileBlock1;
@@ -700,15 +735,21 @@ export class PPU implements IMemoryInterface {
           this.pixelData.bgFetcher.state = FetcherState.Push;
         }
 
+        bgFetcher.cycle = 0;
         return;
       }
 
       case FetcherState.Push: {
-        if (this.pixelData.bgShiftRegister.length === 0) {
-          this.pixelData.bgShiftRegister.push(...bgFetcher.buffer);
-          bgFetcher.pixelX += 8;
-          bgFetcher.buffer = [];
-          this.pixelData.bgFetcher.state = FetcherState.GetTile;
+        if (bgFetcher.cycle === 0) {
+          if (this.pixelData.bgShiftRegister.length === 0) {
+            this.pixelData.bgShiftRegister.push(...bgFetcher.buffer);
+            bgFetcher.pixelX += 8;
+            bgFetcher.buffer = [];
+            bgFetcher.cycle = 1;
+          }
+        } else {
+          bgFetcher.cycle = 0;
+            this.pixelData.bgFetcher.state = FetcherState.GetTile;
         }
         return;
       }
@@ -720,12 +761,23 @@ export class PPU implements IMemoryInterface {
 
     switch (spriteFetcher.state) {
       case FetcherState.GetTile: {
+        if (spriteFetcher.cycle === 0) {
+          spriteFetcher.cycle = 1;
+          return;
+        }
+
         // This is a no-op, since we already have this data stored from our OAM search
         spriteFetcher.state = FetcherState.GetTileDataLow;
+        spriteFetcher.cycle = 0;
         return;
       }
 
       case FetcherState.GetTileDataLow: {
+        if (spriteFetcher.cycle === 0) {
+          spriteFetcher.cycle = 1;
+          return;
+        }
+
         const tileAreaBase = VRAMAddress.TileBlock1;
 
         const processedIndex = this.LCDC.bit(LCDCBit.OBJSize)
@@ -742,10 +794,16 @@ export class PPU implements IMemoryInterface {
 
         spriteFetcher.lowByte = this.VRAM[addr - VRAMAddress.Start];
         spriteFetcher.state = FetcherState.GetTileDataHigh;
+        spriteFetcher.cycle = 0;
         return;
       }
 
       case FetcherState.GetTileDataHigh: {
+        if (spriteFetcher.cycle === 0) {
+          spriteFetcher.cycle = 1;
+          return;
+        }
+
         const tileAreaBase = VRAMAddress.TileBlock1;
 
         const processedIndex = this.LCDC.bit(LCDCBit.OBJSize)
@@ -788,50 +846,65 @@ export class PPU implements IMemoryInterface {
         }
 
         spriteFetcher.state = FetcherState.Push;
+        spriteFetcher.cycle = 0;
         return;
       }
 
       case FetcherState.Push: {
-        const shiftReg = this.pixelData.spriteShiftRegister;
+        if (spriteFetcher.cycle === 0) {
+          const shiftReg = this.pixelData.spriteShiftRegister;
 
-        for (let i = 0; i < spriteFetcher.buffer.length; i++) {
-          if (shiftReg[i]) {
-            if (shiftReg[i].finalColorIndex === 0 && spriteFetcher.buffer[i].finalColorIndex !== 0) {
-              shiftReg[i] = spriteFetcher.buffer[i];
-            }
-          } else {
-            shiftReg.push(spriteFetcher.buffer[i]);
+          if (spriteFetcher.oamResult.x < 8) {
+            spriteFetcher.buffer.splice(0, 8 - spriteFetcher.oamResult.x);
           }
+
+          for (let i = 0; i < spriteFetcher.buffer.length; i++) {
+            if (shiftReg[i]) {
+              if (shiftReg[i].finalColorIndex === 0 && spriteFetcher.buffer[i].finalColorIndex !== 0) {
+                shiftReg[i] = spriteFetcher.buffer[i];
+              }
+            } else {
+              shiftReg.push(spriteFetcher.buffer[i]);
+            }
+          }
+
+          spriteFetcher.cycle = 1;
+          spriteFetcher.buffer = [];
+        } else {
+          spriteFetcher.active = false;
+          spriteFetcher.oamResult = null;
+          spriteFetcher.cycle = 0;
+          spriteFetcher.state = FetcherState.GetTile;
         }
 
-        spriteFetcher.buffer = [];
-        spriteFetcher.state = FetcherState.GetTile;
-        spriteFetcher.active = false;
-        spriteFetcher.oamResult = null;
         return;
       }
     }
   }
 
   private pixelPipe(catchupCycles: number) {
-    while (catchupCycles >= 2) {
+    while (catchupCycles >= 1) {
       const {bgFetcher, spriteFetcher} = this.pixelData;
 
+      let fetchJustFinished = false;
       if (spriteFetcher.active) {
         this.spriteFetch();
-      } else {
-        // Search for any sprite that should be rendered right now
-        const spriteIndex = this.OAMSearchBuffer.findIndex(s => s.x <= this.pixelData.currentPixelX + 8);
-        let sprite;
-        if (spriteIndex > -1) {
-          sprite = this.OAMSearchBuffer[spriteIndex];
-          this.OAMSearchBuffer.splice(spriteIndex,  1);
-        }
+        fetchJustFinished = !spriteFetcher.active;
+      }
 
+      if (!spriteFetcher.active) {
+        // Select the highest priority sprite
+        const sprite = this.OAMSearchBuffer.find(s => s.x <= this.pixelData.currentPixelX + 8);
         if (sprite) {
+          const spriteIndex = this.OAMSearchBuffer.indexOf(sprite);
+          this.OAMSearchBuffer.splice(spriteIndex,  1);
+
           spriteFetcher.oamResult = sprite;
           spriteFetcher.active = true;
-          this.spriteFetch();
+
+          if (!fetchJustFinished) {
+            this.spriteFetch();
+          }
         }
       }
 
@@ -839,76 +912,69 @@ export class PPU implements IMemoryInterface {
         this.bgFetch();
       }
 
-      for (let i = 0; i < 2; i++) {
-        if (this.pixelData.bgShiftRegister.length > 0 && !spriteFetcher.active) {
+      if (this.pixelData.bgShiftRegister.length > 0 && !spriteFetcher.active) {
+        // TODO: This is still wrong - need to go one pixel at a time and decrement the
+        // catchupCycles each time
+        if (!this.pixelData.hasDiscardedPixels) {
+          const scxMod8 = this.SCX.value % 8;
+          this.pixelData.bgShiftRegister.splice(0, scxMod8);
+          this.pixelData.hasDiscardedPixels = true;
+        }
 
-          // TODO: This is still wrong - need to go one pixel at a time and decrement the
-          // catchupCycles each time
-          if (!this.pixelData.hasDiscardedPixels) {
-            const scxMod8 = this.SCX.value % 8;
-            this.pixelData.bgShiftRegister.splice(0, scxMod8);
-            this.pixelData.hasDiscardedPixels = true;
-          }
+        const bgPaletteIndex = this.pixelData.bgShiftRegister.shift();
+        const bgColorIndex = (this.BGP.value >> (bgPaletteIndex * 2)) & 0b11;
+        const bgColor = colors[bgColorIndex];
 
-          const bgPaletteIndex = this.pixelData.bgShiftRegister.shift();
-          const bgColorIndex = (this.BGP.value >> (bgPaletteIndex * 2)) & 0b11;
-          const bgColor = colors[bgColorIndex];
+        if (this.pixelData.spriteShiftRegister.length) {
+          const {finalColorIndex, bgAndWindowOverSprite} = this.pixelData.spriteShiftRegister.shift();
+          const spColor = colors[finalColorIndex];
 
-          if (this.pixelData.spriteShiftRegister.length) {
-            const {colorIndex, useOBP1, bgAndWindowOverSprite} = this.pixelData.spriteShiftRegister.shift();
-            const palette = useOBP1 ? this.OBP1.value : this.OBP0.value;
-            const spColorIndex = (palette >> (colorIndex * 2)) & 0b11;
-            const spColor = colors[spColorIndex];
+          const spritesEnabled = this.LCDC.bit(LCDCBit.OBJEnable);
+          const bgEnabled = this.LCDC.bit(LCDCBit.BGAndWindowEnablePriority);
 
-            const spritesEnabled = this.LCDC.bit(LCDCBit.OBJEnable);
-            const bgEnabled = this.LCDC.bit(LCDCBit.BGAndWindowEnablePriority);
-
-            // If this pixel is "transparent", draw the background pixel
-            if (!spritesEnabled || colorIndex === 0 || (bgAndWindowOverSprite && bgColorIndex !== 0)) {
-              if (!bgEnabled) {
-                this.screen.pushPixel(WHITE);
-              } else {
-                this.screen.pushPixel(bgColor);
-              }
-            } else {
-              this.screen.pushPixel(spColor);
-            }
-          } else {
-            const bgEnabled = this.LCDC.bit(LCDCBit.BGAndWindowEnablePriority);
+          // If this pixel is "transparent", draw the background pixel
+          if (!spritesEnabled || finalColorIndex === 0 || (bgAndWindowOverSprite && bgColorIndex !== 0)) {
             if (!bgEnabled) {
               this.screen.pushPixel(WHITE);
             } else {
               this.screen.pushPixel(bgColor);
             }
-          }
-
-          this.pixelData.currentPixelX++;
-          catchupCycles--;
-
-          const isWindow = this.pixelData.windowIsActiveThisScanline || (
-            this.LCDC.bit(LCDCBit.WindowEnable)
-            && (this.pixelData.windowHasBegunThisFrame || (this.WY.value === this.LY.value))
-            && (this.pixelData.currentPixelX >= this.WX.value - 7)
-          );
-
-          if (isWindow && !this.pixelData.windowIsActiveThisScanline) {
-            this.pixelData.bgShiftRegister = [];
-            bgFetcher.pixelX = 0;
-            bgFetcher.buffer = [];
-            bgFetcher.state = FetcherState.GetTile;
-            bgFetcher.windowLineCounter++;
-            this.pixelData.windowIsActiveThisScanline = true;
-            this.pixelData.windowHasBegunThisFrame = true;
-          }
-
-          // If we reach the end of a line, jump out and allow a state change
-          if (this.pixelData.currentPixelX % PIXELS_PER_ROW === 0) {
-            return catchupCycles;
+          } else {
+            this.screen.pushPixel(spColor);
           }
         } else {
-          // Completely empty, wait to be loaded
-          catchupCycles--;
+          const bgEnabled = this.LCDC.bit(LCDCBit.BGAndWindowEnablePriority);
+          if (!bgEnabled) {
+            this.screen.pushPixel(WHITE);
+          } else {
+            this.screen.pushPixel(bgColor);
+          }
         }
+
+        this.pixelData.currentPixelX++;
+
+        const isWindow = this.pixelData.windowIsActiveThisScanline || (
+          this.LCDC.bit(LCDCBit.WindowEnable)
+          && (this.pixelData.windowHasBegunThisFrame || (this.WY.value === this.LY.value))
+          && (this.pixelData.currentPixelX >= this.WX.value - 7)
+        );
+
+        if (isWindow && !this.pixelData.windowIsActiveThisScanline) {
+          this.pixelData.bgShiftRegister = [];
+          bgFetcher.pixelX = 0;
+          bgFetcher.buffer = [];
+          bgFetcher.state = FetcherState.GetTile;
+          bgFetcher.windowLineCounter++;
+          this.pixelData.windowIsActiveThisScanline = true;
+          this.pixelData.windowHasBegunThisFrame = true;
+        }
+      }
+
+      catchupCycles--;
+
+      // If we reach the end of a line, jump out and allow a state change
+      if (this.pixelData.currentPixelX % PIXELS_PER_ROW === 0) {
+        return catchupCycles;
       }
     }
 
