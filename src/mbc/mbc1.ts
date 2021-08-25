@@ -9,11 +9,10 @@ enum MBC1Mode {
   // TODO: Advanced ROM Banking mode (value equivilent to RAMBanking)
 }
 
-export class MBC1 extends MemoryBankController implements IMemoryInterface
- {
+export class MBC1 extends MemoryBankController implements IMemoryInterface {
   private romBank0: Uint8Array = new Uint8Array(0x4000);
-  private romBank1: Uint8Array = new Uint8Array(0x4000);
-  private eram: Uint8Array[] = [];
+  private romBank1: Uint8Array;
+  private eram: Uint8Array;
 
   private mbcMode: MBC1Mode = MBC1Mode.Default;
 
@@ -21,16 +20,19 @@ export class MBC1 extends MemoryBankController implements IMemoryInterface
 
   private hasERAM = false;
   private ERAMEnabled = false;
-  private ERAMIndex = 0;
+  private ERAMOffset = 0;
+
+  private bank1Offset = 0x4000;
 
   constructor(cart: Uint8Array, header: ParsedHeader) {
     super(cart, header);
-    this.loadROMBank0(cart.slice(0, 0x4000));
-    this.loadROMBank1(cart.slice(0x4000, 0x8000));
+
+    this.romBank0 = cart.slice(0, 0x4000);
+    this.romBank1 = cart.slice(0x4000);
 
     if (header.ram.banks > 0) {
       this.hasERAM = true;
-      this.eram = Array.from({ length: header.ram.banks }, () => new Uint8Array(0x2000));
+      this.eram = new Uint8Array(0x2000 * header.ram.banks);
     }
   }
 
@@ -40,12 +42,12 @@ export class MBC1 extends MemoryBankController implements IMemoryInterface
     }
 
     if (address >= MBCAddress.ROMBank1 && address <= MBCAddress.ROMEnd) {
-      return this.romBank1[address - 0x4000];
+      return this.romBank1[address - MBCAddress.ROMBank1 + this.bank1Offset];
     }
 
     if (address >= MBCAddress.ERAMStart && address <= MBCAddress.ERAMEnd) {
       if (this.hasERAM && this.ERAMEnabled) {
-        return this.eram[this.ERAMIndex][address - MBCAddress.ERAMStart];
+        return this.eram[address - MBCAddress.ERAMStart + this.ERAMOffset];
       }
     }
   }
@@ -80,8 +82,8 @@ export class MBC1 extends MemoryBankController implements IMemoryInterface
           }
         }
 
-        const cartOffset = bankNum * 0x4000;
-        this.loadROMBank1(this.cart.slice(cartOffset, cartOffset + 0x4000));
+        // The bank number is offset by -1 because romBank0 is never taken into account
+        this.bank1Offset = (bankNum - 1) * 0x4000;
 
         return;
       }
@@ -103,7 +105,7 @@ export class MBC1 extends MemoryBankController implements IMemoryInterface
             throw new Error(`ERAM selection index out of bounds (${maskedIndex})`);
           }
 
-          this.ERAMIndex = maskedIndex;
+          this.ERAMOffset = maskedIndex * 0x2000;
         }
         return;
       }
@@ -113,24 +115,6 @@ export class MBC1 extends MemoryBankController implements IMemoryInterface
         this.mbcMode = value & 0x01;
         return;
       }
-    }
-  }
-
-  loadROMBank0(data: Uint8Array) {
-    if (data.byteLength > 0x4000) {
-      throw new RangeError(`Bank0: ROM size exceeds bank capacity (size=${data.byteLength})`);
-    }
-    for (let i = 0; i < data.length; i++) {
-      this.romBank0[i] = data[i];
-    }
-  }
-
-  loadROMBank1(data: Uint8Array) {
-    if (data.byteLength > 0x4000) {
-      throw new RangeError(`Bank1: ROM size exceeds bank capacity (size=${data.byteLength})`);
-    }
-    for (let i = 0; i < data.length; i++) {
-      this.romBank1[i] = data[i];
     }
   }
 }
