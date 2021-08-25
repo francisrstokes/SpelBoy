@@ -178,6 +178,7 @@ type PixelPushData = {
   windowIsActiveThisScanline: boolean;
 
   currentPixelX: number;
+  pixelDiscardBegun: boolean;
   hasDiscardedPixels: boolean;
   pixelsToDiscard: number;
 };
@@ -363,10 +364,11 @@ export class PPU implements IMemoryInterface {
       bgShiftRegister: [],
       spriteShiftRegister: [],
       currentPixelX: 0,
-      hasDiscardedPixels: false,
       windowHasBegunThisFrame: false,
       windowIsActiveThisScanline: false,
 
+      pixelDiscardBegun: false,
+      hasDiscardedPixels: false,
       pixelsToDiscard: 0
     }
   }
@@ -449,6 +451,7 @@ export class PPU implements IMemoryInterface {
             this.pixelData.currentPixelX = 0;
             this.pixelData.windowIsActiveThisScanline = false;
             this.pixelData.hasDiscardedPixels = false;
+            this.pixelData.pixelDiscardBegun = false;
             this.pixelData.pixelsToDiscard = 0;
 
             this.pixelData.spriteShiftRegister = [];
@@ -623,7 +626,6 @@ export class PPU implements IMemoryInterface {
     // The coordination is done by the pixelPipe method, and so fetching does not
     // run in a loop, but is executed externally one step at a time
 
-    // TODO: Implement window
     switch (bgFetcher.state) {
       case FetcherState.GetTile: {
         if (bgFetcher.cycle === 0) {
@@ -913,12 +915,28 @@ export class PPU implements IMemoryInterface {
       }
 
       if (this.pixelData.bgShiftRegister.length > 0 && !spriteFetcher.active) {
-        // TODO: This is still wrong - need to go one pixel at a time and decrement the
-        // catchupCycles each time
+
+        // Check to see if we've started the pixel discard procedure
+        if (!this.pixelData.pixelDiscardBegun) {
+          this.pixelData.pixelsToDiscard = this.SCX.value % 8;
+          this.pixelData.pixelDiscardBegun = true;
+
+          // If there aren't any pixels to discard, short circuit
+          if (this.pixelData.pixelsToDiscard === 0) {
+            this.pixelData.hasDiscardedPixels = true;
+          }
+        }
+
+        // If we need to discard pixels, that takes precedence over pixel pushes
         if (!this.pixelData.hasDiscardedPixels) {
-          const scxMod8 = this.SCX.value % 8;
-          this.pixelData.bgShiftRegister.splice(0, scxMod8);
-          this.pixelData.hasDiscardedPixels = true;
+          this.pixelData.bgShiftRegister.shift();
+          this.pixelData.pixelsToDiscard--;
+
+          if (this.pixelData.pixelsToDiscard === 0) {
+            this.pixelData.hasDiscardedPixels = true;
+          }
+
+          continue;
         }
 
         const bgPaletteIndex = this.pixelData.bgShiftRegister.shift();
