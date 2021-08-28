@@ -1,26 +1,16 @@
 import { MemoryInterface } from './memory-interface';
 import { SM83 } from './sharp-sm83';
-
-import { PPU, PPURegister } from './ppu';
+import { PPU } from './ppu';
 import { Clock } from './clock';
+import { Timer } from './timer';
+import { GameBoyButton, Input } from './input';
 
 import { PixelCanvas } from './pixel-canvas';
-
-// @ts-ignore
-// import romDataRaw from '../test-roms/gameboy-test-roms-v3.0/blargg/mem_timing/individual/01-read_timing.gb';
-// import romDataRaw from '../test-roms/dmg-acid2.gb';
-// import romDataRaw from '../roms/dr-mario.gb';
-import romDataRaw from '../roms/tetris.gb';
-// import romDataRaw from '../blargg/cpu_instrs.gb';
-// import romDataRaw from '../roms/alleyway.gb';
-import { toBinString, toHexString } from './utils';
-import { Timer } from './timer';
-
-import { GameBoyButton, Input } from './input';
 import { parseCart, ParsedHeader } from './cart-parser';
 
 const CYCLES_PER_ANIMATION_FRAME = 70224;
 const MAX_SPEED_MULTIPLIER = 15;
+const MIN_SPEED_MULTIPLIER = 0.1;
 let speedMultiplier = 1;
 
 const keyMap: Record<string, GameBoyButton> = {
@@ -88,52 +78,42 @@ export class SpelBoy {
   }
 }
 
-const sb = new SpelBoy();
+let sb: SpelBoy;
+let keyHandler: (e: KeyboardEvent) => void;
 
-const romData = new Uint8Array(romDataRaw);
-sb.load(romData);
-
-sb.run();
-
-document.addEventListener('keydown', e => {
-  console.log(e.key)
-  if (e.key === 'd') {
-    const vram = sb.ppu.getVRAM();
-    const vramString = [...vram].map(x => toHexString(x, 2)).join(' ');
-
-    const dumpEl = document.createElement('textarea') as HTMLTextAreaElement;
-    dumpEl.value = vramString;
-    document.body.appendChild(dumpEl);
-
-    console.log(vramString);
+const load = (data: Uint8Array) => {
+  if (sb) {
     sb.hardStop();
   }
 
-  if (e.key === 'r') {
-    const prettyPrint = (n:number) => {
-      return `$${toHexString(n)} (${toBinString(n)}})`
-    };
+  sb = new SpelBoy();
+  sb.load(data);
+  sb.run();
 
-    const regs = {
-      LCDC: prettyPrint(sb.memory.read(PPURegister.LCDC)),
-      STAT: prettyPrint(sb.memory.read(PPURegister.STAT)),
-      SCY: prettyPrint(sb.memory.read(PPURegister.SCY)),
-      SCX: prettyPrint(sb.memory.read(PPURegister.SCX)),
-      LY: prettyPrint(sb.memory.read(PPURegister.LY)),
-      LYC: prettyPrint(sb.memory.read(PPURegister.LYC)),
-      DMA: prettyPrint(sb.memory.read(PPURegister.DMA)),
-      BGP: prettyPrint(sb.memory.read(PPURegister.BGP)),
-      OBP0: prettyPrint(sb.memory.read(PPURegister.OBP0)),
-      OBP1: prettyPrint(sb.memory.read(PPURegister.OBP1)),
-      WX: prettyPrint(sb.memory.read(PPURegister.WX)),
-      WY: prettyPrint(sb.memory.read(PPURegister.WY)),
-    };
-
-    console.log(regs);
-    // sb.hardStop();
+  if (keyHandler) {
+    document.removeEventListener('keydown', keyHandler);
   }
 
-  if (e.key === '0') {
-    speedMultiplier = speedMultiplier === 1 ? MAX_SPEED_MULTIPLIER : 1;
+  keyHandler = (e: KeyboardEvent) => {
+    if (e.key === '0') {
+      speedMultiplier = speedMultiplier === 1 ? MAX_SPEED_MULTIPLIER : 1;
+    }
+
+    if (e.key === '9') {
+      speedMultiplier = speedMultiplier === 1 ? MIN_SPEED_MULTIPLIER : 1;
+    }
   }
+
+  document.addEventListener('keydown', keyHandler);
+}
+
+document.getElementById('loadRom').addEventListener('change', async (e: Event) => {
+  const reader = new FileReader();
+  reader.addEventListener('load', (event) => {
+    if (typeof event.target.result === 'string') {
+      throw new Error('Invalid ROM file');
+    }
+    load(new Uint8Array(event.target.result));
+  });
+  reader.readAsArrayBuffer((e.target as HTMLInputElement).files[0]);
 });

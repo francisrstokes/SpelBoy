@@ -12,13 +12,19 @@
       image-rendering: -moz-crisp-edges;
       image-rendering: -webkit-crisp-edges;
 
-      transform: scale(4);
-      transform-origin: 0 0;
+      width: 500px;
     }
   </style>
 </head>
 <body>
   <canvas id="main" width="160" height="144"></canvas>
-  <script type="module" src="spelboy.ts"></script>
+  <script type="module" src="audio-test.ts"></script>
+
+  <div>
+    <label>
+      Load GameBoy ROM File
+      <input type="file" id="loadRom" accept=".gb">
+    </label>
+  </div>
 </body>
 </html>
